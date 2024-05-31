@@ -21,7 +21,8 @@ func startServing(addr net.Addr, contactAddr net.Addr) {
 
 func main() {
 	// take command line arguments (ip and port)
-	if len(os.Args) != 5 {
+	if len(os.Args) < 3 {
+		fmt.Println("Usage: go run client.go <ip> <port>")
 		fmt.Println("Usage: go run client.go <ip> <port> <contact_ip> <contact_port>")
 		os.Exit(0)
 	}
@@ -30,6 +31,11 @@ func main() {
 	if err != nil {
 		fmt.Println("Error resolving address")
 		os.Exit(0)
+	}
+
+	if len(os.Args) == 3 {
+		startServing(addr, nil)
+		return
 	}
 
 	contactAddr, err := net.ResolveTCPAddr("tcp", os.Args[3]+":"+os.Args[4])
