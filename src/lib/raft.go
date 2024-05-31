@@ -55,7 +55,7 @@ func NewRaftNode(addr net.Addr, contactAddr *net.Addr) *RaftNode {
 		clusterLeader:   nil,
 		contactAddr:     contactAddr,
 		heartbeatTicker: time.NewTicker(HEARTBEAT_INTERVAL),
-		electionTimeout: time.NewTicker(time.Duration(ELECTION_TIMEOUT_MIN.Nanoseconds()+rand.Int63n(ELECTION_TIMEOUT_MAX.Nanoseconds()-ELECTION_TIMEOUT_MIN.Nanoseconds())) * time.Second),
+		electionTimeout: time.NewTicker(time.Duration(ELECTION_TIMEOUT_MIN.Nanoseconds()+rand.Int63n(ELECTION_TIMEOUT_MAX.Nanoseconds()-ELECTION_TIMEOUT_MIN.Nanoseconds())) * time.Nanosecond),
 	}
 
 	if contactAddr == nil {
