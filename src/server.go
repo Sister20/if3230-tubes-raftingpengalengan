@@ -8,7 +8,10 @@ import (
 
 func startServing(addr net.Addr, contactAddr net.Addr) {
 	fmt.Println("Starting server at", addr.String())
-	fmt.Println("Contacting server at", contactAddr.String())
+
+	if contactAddr != nil {
+		fmt.Println("Contacting server at", contactAddr.String())
+	}
 
 	//TODO: implement the server logic
 	/* from guidebook
