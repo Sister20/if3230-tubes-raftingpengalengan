@@ -25,8 +25,8 @@ func startServing(addr net.Addr, contactAddr net.Addr) {
 func main() {
 	// take command line arguments (ip and port)
 	if len(os.Args) < 3 {
-		fmt.Println("Usage: go run client.go <ip> <port>")
-		fmt.Println("Usage: go run client.go <ip> <port> <contact_ip> <contact_port>")
+		fmt.Println("Usage: go run server.go <ip> <port>")
+		fmt.Println("Usage: go run server.go <ip> <port> [contact_ip] [contact_port]")
 		os.Exit(0)
 	}
 
