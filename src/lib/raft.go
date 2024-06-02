@@ -19,10 +19,10 @@ const (
 )
 
 const (
-	HEARTBEAT_INTERVAL   = 1 * time.Second
-	ELECTION_TIMEOUT_MIN = 2 * time.Second
-	ELECTION_TIMEOUT_MAX = 3 * time.Second
-	RPC_TIMEOUT          = 500 * time.Millisecond
+	HeartbeatInterval  = 1 * time.Second
+	ElectionTimeoutMin = 2 * time.Second
+	ElectionTimeoutMax = 3 * time.Second
+	RpcTimeout         = 500 * time.Millisecond
 )
 
 type LogEntry struct {
@@ -54,8 +54,8 @@ func NewRaftNode(addr net.Addr, contactAddr *net.Addr) *RaftNode {
 		clusterAddrList: make([]net.Addr, 0),
 		clusterLeader:   nil,
 		contactAddr:     contactAddr,
-		heartbeatTicker: time.NewTicker(HEARTBEAT_INTERVAL),
-		electionTimeout: time.NewTicker(time.Duration(ELECTION_TIMEOUT_MIN.Nanoseconds()+rand.Int63n(ELECTION_TIMEOUT_MAX.Nanoseconds()-ELECTION_TIMEOUT_MIN.Nanoseconds())) * time.Nanosecond),
+		heartbeatTicker: time.NewTicker(HeartbeatInterval),
+		electionTimeout: time.NewTicker(time.Duration(ElectionTimeoutMin.Nanoseconds()+rand.Int63n(ElectionTimeoutMax.Nanoseconds()-ElectionTimeoutMin.Nanoseconds())) * time.Nanosecond),
 	}
 
 	if contactAddr == nil {
@@ -80,7 +80,13 @@ func (node *RaftNode) initializeAsLeader() {
 func (node *RaftNode) leaderHeartbeat() {
 	for range node.heartbeatTicker.C {
 		log.Println("[Leader] Sending heartbeat...")
-		// TODO: implement sending heartbeat to all nodes in the cluster
+		for _, addr := range node.clusterAddrList {
+			if addr.String() == node.address.String() {
+				continue
+			}
+
+			go node.sendRequest("RaftNode.AppendEntries", addr, nil)
+		}
 	}
 }
 
@@ -88,14 +94,21 @@ func (node *RaftNode) tryToApplyMembership(contactAddr net.Addr) {
 	for {
 		response := node.sendRequest("RaftNode.ApplyMembership", contactAddr, node.address)
 		var result map[string]interface{}
-		json.Unmarshal(response, &result)
+
+		err := json.Unmarshal(response, &result)
+		if err != nil {
+			continue
+		}
+
 		status := result["status"].(string)
 		if status == "success" {
 			node.mu.Lock()
-			defer node.mu.Unlock()
+
 			node.clusterAddrList = parseAddresses(result["clusterAddrList"].([]interface{}))
 			temp := parseAddress(result["clusterLeader"].(map[string]interface{}))
 			node.clusterLeader = &temp
+
+			node.mu.Unlock()
 			break
 		} else if status == "redirected" {
 			newAddr := parseAddress(result["address"].(map[string]interface{}))
@@ -105,7 +118,7 @@ func (node *RaftNode) tryToApplyMembership(contactAddr net.Addr) {
 }
 
 func (node *RaftNode) sendRequest(method string, addr net.Addr, request interface{}) []byte {
-	conn, err := net.DialTimeout("tcp", addr.String(), RPC_TIMEOUT)
+	conn, err := net.DialTimeout("tcp", addr.String(), RpcTimeout)
 	if err != nil {
 		log.Fatalf("Dialing failed: %v", err)
 	}
