@@ -44,6 +44,18 @@ type RaftNode struct {
 	electionTimeout *time.Ticker
 }
 
+type RaftVoteRequest struct {
+	Term         int
+	CandidateId  net.Addr
+	LastLogIndex int
+	LastLogTerm  int
+}
+
+type RaftVoteResponse struct {
+	Term        int
+	VoteGranted bool
+}
+
 func NewRaftNode(addr net.Addr, contactAddr *net.Addr) *RaftNode {
 	node := &RaftNode{
 		address:         addr,
@@ -87,6 +99,63 @@ func (node *RaftNode) leaderHeartbeat() {
 
 			go node.sendRequest("RaftNode.AppendEntries", addr, nil)
 		}
+	}
+}
+
+func (node *RaftNode) AppendEntries(args interface{}) {
+	log.Println("[Follower] Received heartbeat...")
+}
+
+func (node *RaftNode) startElection() {
+	node.mu.Lock()
+
+	log.Println("Starting election...")
+	node.nodeType = CANDIDATE
+	node.electionTerm++
+	node.clusterLeader = nil
+
+	node.mu.Unlock()
+
+	voteCount := 1
+
+	for _, addr := range node.clusterAddrList {
+		if addr.String() == node.address.String() {
+			continue
+		}
+
+		go func(addr net.Addr) {
+			response := node.sendRequest("RaftNode.RequestVote", addr, RaftVoteRequest{
+				Term:         node.electionTerm,
+				CandidateId:  node.address,
+				LastLogIndex: len(node.log) - 1,
+				LastLogTerm:  0,
+			})
+
+			var result RaftVoteResponse
+			err := json.Unmarshal(response, &result)
+			if err != nil {
+				log.Fatalf("Error unmarshalling response: %v", err)
+			}
+
+			if result.Term > node.electionTerm {
+				node.mu.Lock()
+				defer node.mu.Unlock()
+				node.nodeType = FOLLOWER
+				node.electionTerm = result.Term
+				return
+			}
+
+			if result.VoteGranted {
+				voteCount++
+				if voteCount > len(node.clusterAddrList)/2+1 {
+					node.mu.Lock()
+					defer node.mu.Unlock()
+					node.nodeType = LEADER
+					node.clusterLeader = &node.address
+					go node.leaderHeartbeat()
+				}
+			}
+		}(addr)
 	}
 }
 
