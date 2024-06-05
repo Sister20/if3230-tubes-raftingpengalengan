@@ -45,14 +45,14 @@ func NewRaftNode(store *KVStore, addr net.Addr, contactAddr net.Addr) *RaftNode 
 	return &RaftNode{store: store, addr: addr, contactAddr: contactAddr}
 }
 
-// You can add RaftNode methods here to handle RPC calls.
+// add RaftNode methods here to handle RPC calls if necessary
 
 func startServing(addr net.Addr, contactAddr net.Addr) {
 	fmt.Println("Starting server at", addr.String())
 
 	if contactAddr != nil {
 		fmt.Println("Contacting server at", contactAddr.String())
-		// Here you can implement the logic to contact the other node if necessary
+		// implement the logic to contact the other node if necessary
 	}
 
 	kvStore := NewKVStore()
