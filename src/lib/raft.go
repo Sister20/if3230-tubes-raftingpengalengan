@@ -26,15 +26,15 @@ const (
 )
 
 type LogEntry struct {
-	Term    string
+	Term    int
 	Command string
 }
 
+// TODO: Adjust the struct fields as needed
 type RaftNode struct {
 	mu              sync.Mutex
 	address         net.Addr
 	nodeType        NodeType
-	log             []LogEntry
 	app             *KVStore
 	clusterAddrList []net.Addr
 	clusterLeader   *net.Addr
@@ -42,6 +42,19 @@ type RaftNode struct {
 	heartbeatTicker *time.Ticker
 	electionTerm    int
 	electionTimeout *time.Ticker
+
+	// Persistent server states
+	currentTerm int
+	votedFor    net.Addr
+	log         []LogEntry
+
+	// Volatile server states
+	commitIndex int
+	lastApplied int
+
+	// Volatile leader states
+	nextIndex  map[net.Addr]int
+	matchIndex map[net.Addr]int
 }
 
 type RaftVoteRequest struct {
@@ -56,6 +69,20 @@ type RaftVoteResponse struct {
 	VoteGranted bool
 }
 
+type AppendEntriesRequest struct {
+	Term         int
+	LeaderId     net.Addr
+	PrevLogIndex int
+	PrevLogTerm  int
+	Entries      []LogEntry
+	LeaderCommit int
+}
+
+type AppendEntriesResponse struct {
+	Term    int
+	Success bool
+}
+
 func NewRaftNode(addr net.Addr, contactAddr *net.Addr) *RaftNode {
 	node := &RaftNode{
 		address:         addr,
@@ -68,6 +95,12 @@ func NewRaftNode(addr net.Addr, contactAddr *net.Addr) *RaftNode {
 		contactAddr:     contactAddr,
 		heartbeatTicker: time.NewTicker(HeartbeatInterval),
 		electionTimeout: time.NewTicker(time.Duration(ElectionTimeoutMin.Nanoseconds()+rand.Int63n(ElectionTimeoutMax.Nanoseconds()-ElectionTimeoutMin.Nanoseconds())) * time.Nanosecond),
+		currentTerm:     0,
+		votedFor:        nil,
+		commitIndex:     0,
+		lastApplied:     0,
+		nextIndex:       make(map[net.Addr]int),
+		matchIndex:      make(map[net.Addr]int),
 	}
 
 	if contactAddr == nil {
@@ -100,6 +133,19 @@ func (node *RaftNode) leaderHeartbeat() {
 			go node.sendRequest("RaftNode.AppendEntries", addr, nil)
 		}
 	}
+}
+
+// TODO: Implement the true condition
+func (node *RaftNode) RequestVote(args *RaftVoteRequest, reply *RaftVoteResponse) {
+	node.mu.Lock()
+	defer node.mu.Unlock()
+
+	// Return false if the candidate's term is less than the current term
+	if args.Term > node.log[len(node.log)-1].Term {
+		reply.Term = node.currentTerm
+		reply.VoteGranted = false
+	}
+
 }
 
 func (node *RaftNode) AppendEntries(args interface{}) {
