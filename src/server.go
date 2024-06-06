@@ -5,47 +5,8 @@ import (
 	"net"
 	"net/rpc"
 	"os"
-	"sync"
+	"rafting/lib"
 )
-
-type KVStore struct {
-	store map[string]string
-	mu    sync.Mutex
-}
-
-func NewKVStore() *KVStore {
-	return &KVStore{store: make(map[string]string)}
-}
-
-func (kv *KVStore) Get(key string, value *string) error {
-	kv.mu.Lock()
-	defer kv.mu.Unlock()
-	if v, ok := kv.store[key]; ok {
-		*value = v
-		return nil
-	}
-	return fmt.Errorf("key not found")
-}
-
-func (kv *KVStore) Put(kvPair [2]string, ack *bool) error {
-	kv.mu.Lock()
-	defer kv.mu.Unlock()
-	kv.store[kvPair[0]] = kvPair[1]
-	*ack = true
-	return nil
-}
-
-type RaftNode struct {
-	store        *KVStore
-	addr         net.Addr
-	contactAddr  net.Addr
-}
-
-func NewRaftNode(store *KVStore, addr net.Addr, contactAddr net.Addr) *RaftNode {
-	return &RaftNode{store: store, addr: addr, contactAddr: contactAddr}
-}
-
-// add RaftNode methods here to handle RPC calls if necessary
 
 func startServing(addr net.Addr, contactAddr net.Addr) {
 	fmt.Println("Starting server at", addr.String())
@@ -55,16 +16,26 @@ func startServing(addr net.Addr, contactAddr net.Addr) {
 		// implement the logic to contact the other node if necessary
 	}
 
-	kvStore := NewKVStore()
-	raftNode := NewRaftNode(kvStore, addr, contactAddr)
+	raftNode := lib.NewRaftNode(addr, &contactAddr)
 
-	rpc.Register(raftNode)
+	err := rpc.Register(raftNode)
+	if err != nil {
+		fmt.Println("Error registering RaftNode:", err)
+		return
+	}
+
 	listener, err := net.Listen("tcp", addr.String())
 	if err != nil {
 		fmt.Println("Error starting server:", err)
 		return
 	}
-	defer listener.Close()
+
+	defer func(listener net.Listener) {
+		err := listener.Close()
+		if err != nil {
+			fmt.Println("Error closing listener:", err)
+		}
+	}(listener)
 
 	fmt.Println("Server is listening on", addr.String())
 
