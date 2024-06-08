@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/gob"
 	"fmt"
 	"log"
 	"net"
@@ -28,6 +29,14 @@ func startServing(addr net.Addr, contactAddr *net.Addr) {
 }
 
 func main() {
+	// register to gob (all structs for safety)
+	gob.Register(&net.TCPAddr{})
+	gob.Register(&lib.AppendEntriesRequest{})
+	gob.Register(&lib.AppendEntriesResponse{})
+	gob.Register(&lib.LogEntry{})
+	gob.Register(&lib.RaftVoteRequest{})
+	gob.Register(&lib.RaftVoteResponse{})
+
 	// take command line arguments (ip and port)
 	if len(os.Args) < 3 {
 		fmt.Println("Usage: go run server.go <ip> <port>")
