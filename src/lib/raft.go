@@ -204,8 +204,8 @@ func (node *RaftNode) RequestVote(args *RaftVoteRequest, reply *[]byte) error {
 	}
 
 	// Return false if the candidate's term is less than the current term
-	if args.Term > node.currentTerm {
-		log.Printf("[%d, %s] Rejecting vote... (candidate term is less than current term)\n", node.nodeType, node.address.String())
+	if args.Term < node.currentTerm {
+		log.Printf("[%d, %s] Rejecting vote... (candidate term is less than current term) [%d vs %d]\n", node.nodeType, node.address.String(), args.Term, node.currentTerm)
 		responseMap["term"] = node.currentTerm
 		responseMap["voteGranted"] = false
 
@@ -635,6 +635,7 @@ func (node *RaftNode) Execute(args string, reply *[]byte) error {
 
 				if result.Success {
 					node.nextIndex[addr]++
+					node.matchIndex[addr]++
 					responses <- result
 					break
 				} else {
@@ -664,6 +665,23 @@ func (node *RaftNode) Execute(args string, reply *[]byte) error {
 		if response.Success {
 			successCount++
 			if successCount > len(node.clusterAddrList)/2 {
+				// Check if there exists an N such that N > commitIndex, a majority of matchIndex[i] >= N, and log[N].term == currentTerm
+				for N := node.commitIndex + 1; N < len(node.log); N++ {
+					// fmt.Println("Checking N:", N)
+					matchCount := 1
+					for _, matchIndex := range node.matchIndex {
+						// fmt.Println("Match index:", matchIndex)
+						if matchIndex >= N {
+							matchCount++
+						}
+					}
+					if matchCount > len(node.clusterAddrList)/2 && node.log[N].Term == node.currentTerm {
+						// Set commitIndex = N
+						node.commitIndex = N
+						break
+					}
+				}
+				// fmt.Println("Commit index:", node.commitIndex)
 
 				// Commit the log
 				res, ok := node.commit()
