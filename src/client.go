@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net"
@@ -28,29 +29,55 @@ func NewClient(addrs []string) *Client {
 	return &Client{clients: clients, addrs: addrs}
 }
 
-func (c *Client) Call(i int, serviceMethod string, args interface{}, reply interface{}) error {
-	return c.clients[i].Call(serviceMethod, args, reply)
+func (c *Client) Call(i int, serviceMethod string, request interface{}) []byte {
+	conn, err := net.DialTimeout("tcp", c.addrs[i], lib.RpcTimeout)
+	if err != nil {
+		log.Fatalf("Dialing failed: %v", err)
+		return nil
+	}
+
+	client := rpc.NewClient(conn)
+	defer func(client *rpc.Client) {
+		if client != nil {
+			err := client.Close()
+			if err != nil {
+				log.Fatalf("Error closing client: %v", err)
+			}
+		}
+	}(client)
+
+	var reply []byte
+	err = client.Call(serviceMethod, request, &reply)
+	if err != nil {
+		log.Fatalf("Error calling %s: %v", serviceMethod, err)
+	}
+	return reply
 }
 
-func (c *Client) CallAll(serviceMethod string, args interface{}, reply interface{}) []error {
-	errs := make([]error, len(c.clients))
+func (c *Client) CallAll(serviceMethod string, request interface{}) [][]byte {
+	replies := make([][]byte, len(c.clients))
 	for i, client := range c.clients {
-		errs[i] = client.Call(serviceMethod, args, reply)
+		var reply []byte
+		err := client.Call(serviceMethod, request, &reply)
+		if err != nil {
+			log.Fatalf("Error calling %s: %v", err)
+		}
+		replies[i] = reply
 	}
-	return errs
+	return replies
 }
 
 func main() {
-	//addrs := []string{
-	//	"localhost:8080",
-	//	"localhost:8081",
-	//	"localhost:8082",
-	//	"localhost:8083",
-	//	"localhost:8084",
-	//	"localhost:8085",
-	//}
-	//client := NewClient(addrs)
-	//
+	addrs := []string{
+		"localhost:8080",
+		//"localhost:8081",
+		//"localhost:8082",
+		//"localhost:8083",
+		//"localhost:8084",
+		//"localhost:8085",
+	}
+	client := NewClient(addrs)
+
 	reader := bufio.NewReader(os.Stdin)
 
 	// Use client.Call and client.CallAll to send requests
@@ -99,6 +126,43 @@ func main() {
 			}
 			key := parts[1]
 			fmt.Println("Deleting key", key)
+		case "request":
+			if len(parts) < 2 {
+				fmt.Println("Unknown command:", "request "+parts[1])
+				continue
+			}
+			if parts[1] != "log" {
+				fmt.Println("Unknown command:", "request "+parts[1])
+				continue
+			}
+			fmt.Println("Requesting log")
+
+			var response []byte
+			responses := client.CallAll("RaftNode.RequestLog", "")
+
+			for _, x := range responses {
+				if x != nil {
+					response = x
+					break // assume only leader responds
+				}
+			}
+
+			if response == nil {
+				fmt.Println("No response")
+			} else {
+				var responseMap map[string][]lib.LogEntry
+				err := json.Unmarshal(response, &responseMap)
+				if err != nil {
+					fmt.Println("Error unmarshalling log entries:", err)
+				} else {
+					logEntries := responseMap["log"]
+					fmt.Println("Log entries:")
+					for _, entry := range logEntries {
+						fmt.Println(entry)
+					}
+				}
+			}
+
 		default:
 			fmt.Println("Unknown command:", cmd)
 		}

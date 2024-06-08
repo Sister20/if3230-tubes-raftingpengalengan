@@ -670,14 +670,11 @@ func (node *RaftNode) RequestLog(args string, reply *[]byte) error {
 		return nil
 	}
 
-	// Send log to client
-	logList := make([]string, len(node.log))
-	for i, entry := range node.log {
-		logList[i] = strconv.Itoa(entry.Term) + " : " + entry.Command
-	}
+	log.Println("[Leader] Client requesting log...")
 
+	// Send log to client
 	responseMap := map[string]interface{}{
-		"log": logList,
+		"log": node.log,
 	}
 
 	responseBytes, err := json.Marshal(responseMap)
