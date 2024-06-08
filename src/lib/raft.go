@@ -180,7 +180,8 @@ func (node *RaftNode) leaderHeartbeat() {
 				LeaderId:     node.address,
 				PrevLogIndex: node.nextIndex[addr] - 1,
 				PrevLogTerm:  prevLogTerm,
-				Entries:      node.log[node.nextIndex[addr]:],
+				// Entries:      node.log[node.nextIndex[addr]:],
+				Entries:      []LogEntry{},
 				LeaderCommit: node.commitIndex,
 			}
 
@@ -311,10 +312,21 @@ func (node *RaftNode) AppendEntries(args *AppendEntriesRequest, reply *[]byte) e
 	} else { // AppendEntries with entries
 		node.log = node.log[:args.PrevLogIndex+1]
 		node.log = append(node.log, args.Entries...)
-		if args.LeaderCommit > node.commitIndex {
-			node.commitIndex = min(args.LeaderCommit, len(node.log)-1)
-		}
+
 		log.Printf("[%d, %s] Appending entries from %s successfully...\n", node.nodeType, node.address.String(), args.LeaderId.String())
+	}
+
+	if args.LeaderCommit > node.commitIndex {
+		node.commitIndex = min(args.LeaderCommit, len(node.log)-1)
+	}
+
+	if node.commitIndex > node.lastApplied {
+		res, ok := node.commit()
+		if ok {
+			log.Printf("[%d, %s] Applied command: %s\n", node.nodeType, node.address.String(), res)
+		} else {
+			log.Printf("[%d, %s] Failed to apply command\n", node.nodeType, node.address.String())
+		}
 	}
 
 	// Reset election timeout
@@ -346,7 +358,6 @@ func (node *RaftNode) startElection() {
 		if addr.String() == node.address.String() || addr.String() == (*node.contactAddr).String() {
 			continue
 		}
-
 		go func(addr net.Addr) {
 			log.Printf("[%s] Requesting vote\n", node.address)
 			response := node.sendRequest("RaftNode.RequestVote", addr, RaftVoteRequest{
@@ -563,12 +574,93 @@ func (node *RaftNode) Execute(args string, reply *[]byte) error {
 		Term:    node.currentTerm,
 		Command: args,
 	})
+	node.mu.Unlock()
 
-	// Send AppendEntries to all node in the cluster
+	// Send AppendEntries to all nodes in the cluster
+	responses := make(chan AppendEntriesResponse, len(node.clusterAddrList))
+	var wg sync.WaitGroup
+
+	for _, addr := range node.clusterAddrList {
+		if addr.String() == node.address.String() {
+			continue
+		}
+
+		var prevLogTerm int
+		if len(node.log)-2 < 0 {
+			prevLogTerm = 0 // 0 means empty log
+		} else {
+			prevLogTerm = node.log[len(node.log)-2].Term
+		}
+
+		request := &AppendEntriesRequest{
+			Term:         node.currentTerm,
+			LeaderId:     node.address,
+			PrevLogIndex: len(node.log) - 2,
+			PrevLogTerm:  prevLogTerm,
+			Entries:      node.log[len(node.log)-1:],
+			LeaderCommit: node.commitIndex,
+		}
+
+		wg.Add(1)
+		go func(addr net.Addr, request *AppendEntriesRequest) {
+			defer wg.Done()
+			for {
+				response := node.sendRequest("RaftNode.AppendEntries", addr, request)
+
+				var result AppendEntriesResponse
+				err := json.Unmarshal(response, &result)
+				if err != nil {
+					log.Printf("Error unmarshalling response from %s: %v", addr, err)
+					return
+				}
+
+				if result.Success {
+					responses <- result
+					break
+				} else {
+					// time.Sleep(100 * time.Millisecond)
+					request.PrevLogIndex--
+					if request.PrevLogIndex < 0 {
+						request.PrevLogTerm = 0
+					} else {
+						request.PrevLogTerm = node.log[request.PrevLogIndex].Term
+					}
+				}
+
+			}
+		}(addr, request)
+	}
+
+	// Wait for all goroutines to finish and then close the channel
+	go func() {
+		wg.Wait()
+		close(responses)
+	}()
 
 	// If majority ACK received, commit the log
+	successCount := 0
+	for response := range responses {
+		if response.Success {
+			successCount++
+			if successCount > len(node.clusterAddrList)/2 {
 
-	// Send response to client
+				// Commit the log
+				res, ok := node.commit()
+
+				// Send response to client
+				responseMap := map[string]interface{}{
+					"result": res,
+					"ok":     ok,
+				}
+				responseBytes, err := json.Marshal(responseMap)
+				if err != nil {
+					log.Fatalf("Error marshalling response: %v", err)
+				}
+				*reply = responseBytes
+				break
+			}
+		}
+	}
 
 	return nil
 }
