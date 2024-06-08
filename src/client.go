@@ -103,7 +103,7 @@ func (c *Client) Execute(cmd string, args string) string {
 func main() {
 	addrs := []string{
 		"localhost:8080",
-		//"localhost:8081",
+		"localhost:8081",
 		//"localhost:8082",
 		//"localhost:8083",
 		//"localhost:8084",
@@ -112,6 +112,8 @@ func main() {
 	client := NewClient(addrs)
 
 	reader := bufio.NewReader(os.Stdin)
+
+	fmt.Println("Client started")
 
 	// Use client.Call and client.CallAll to send requests
 	for {
@@ -184,9 +186,15 @@ func main() {
 			responses := client.CallAll("RaftNode.RequestLog", "")
 
 			for _, x := range responses {
-				if x != nil {
-					response = x
-					break // assume only leader responds
+				var responseMap map[string]any
+				err := json.Unmarshal(x, &responseMap)
+				if err != nil {
+					fmt.Println("Error unmarshalling log entries:", err)
+				} else {
+					if responseMap["log"] != nil {
+						response = x
+						break // assume only leader responds
+					}
 				}
 			}
 

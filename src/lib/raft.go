@@ -107,6 +107,10 @@ func NewRaftNode(addr net.Addr, contactAddr *net.Addr) *RaftNode {
 		matchIndex:      make(map[net.Addr]int),
 	}
 
+	node.log = append(node.log, LogEntry{Term: 0, Command: "zero"})
+	node.log = append(node.log, LogEntry{Term: 1, Command: "one"})
+	node.log = append(node.log, LogEntry{Term: 2, Command: "two"})
+
 	if contactAddr == nil {
 		node.initializeAsLeader()
 	} else {
@@ -669,6 +673,15 @@ func (node *RaftNode) Execute(args string, reply *[]byte) error {
 
 func (node *RaftNode) RequestLog(args string, reply *[]byte) error {
 	if node.nodeType != LEADER { // only leader may accept client requests
+		responseMap := map[string]interface{}{
+			"error":      "Not leader",
+			"leaderAddr": node.clusterLeader.String(),
+		}
+		responseBytes, err := json.Marshal(responseMap)
+		if err != nil {
+			log.Fatalf("Error marshalling response: %v", err)
+		}
+		*reply = responseBytes
 		return nil
 	}
 
