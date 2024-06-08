@@ -258,7 +258,6 @@ func (node *RaftNode) RequestVote(args *RaftVoteRequest, reply *[]byte) error {
 // TODO: Test this RPC method
 func (node *RaftNode) AppendEntries(args *AppendEntriesRequest, reply *[]byte) error {
 	node.mu.Lock()
-	defer node.mu.Unlock()
 
 	responseMap := map[string]interface{}{
 		"term":    node.currentTerm,
@@ -319,8 +318,11 @@ func (node *RaftNode) AppendEntries(args *AppendEntriesRequest, reply *[]byte) e
 	}
 
 	if args.LeaderCommit > node.commitIndex {
+		log.Printf("[%d, %s] Updating commit index from %d to %d...\n", node.nodeType, node.address.String(), node.commitIndex, min(args.LeaderCommit, len(node.log)-1))
 		node.commitIndex = min(args.LeaderCommit, len(node.log)-1)
 	}
+
+	node.mu.Unlock()
 
 	if node.commitIndex > node.lastApplied {
 		res, ok := node.commit()
@@ -330,6 +332,9 @@ func (node *RaftNode) AppendEntries(args *AppendEntriesRequest, reply *[]byte) e
 			log.Printf("[%d, %s] Failed to apply command\n", node.nodeType, node.address.String())
 		}
 	}
+
+	node.mu.Lock()
+	defer node.mu.Unlock()
 
 	// Reset election timeout
 	node.electionTimeout.Stop()
