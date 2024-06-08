@@ -146,7 +146,7 @@ func (node *RaftNode) leaderHeartbeat() {
 		log.Println("[Leader] Sending heartbeat...")
 
 		request := &AppendEntriesRequest{
-			Term:     -99,
+			Term:     node.currentTerm,
 			LeaderId: node.address,
 		}
 
@@ -224,22 +224,6 @@ func (node *RaftNode) AppendEntries(args *AppendEntriesRequest, reply *[]byte) e
 		"success": true,
 	}
 
-	if args.Term == -99 { // Empty AppendEntries (heartbeat)
-		log.Printf("[%d, %s] Received empty AppendEntries (heartbeat) from %s...\n", node.nodeType, node.address.String(), args.LeaderId.String())
-
-		// Reset election timeout
-		node.electionTimeout.Stop()
-		node.electionTimeout = time.NewTicker(time.Duration(ElectionTimeoutMin.Nanoseconds()+rand.Int63n(ElectionTimeoutMax.Nanoseconds()-ElectionTimeoutMin.Nanoseconds())) * time.Nanosecond)
-
-		responseBytes, err := json.Marshal(responseMap)
-		if err != nil {
-			log.Printf("Error marshalling response: %v", err)
-		}
-		*reply = responseBytes
-
-		return nil
-	}
-
 	if args.Term < node.currentTerm { // Reject AppendEntries if term is less than current term
 		log.Printf("[%d, %s] Rejecting AppendEntries from %s... (Term is less than current term)\n", node.nodeType, node.address.String(), args.LeaderId.String())
 		responseMap["term"] = node.currentTerm
@@ -280,11 +264,17 @@ func (node *RaftNode) AppendEntries(args *AppendEntriesRequest, reply *[]byte) e
 		return nil
 	}
 
-	node.log = node.log[:args.PrevLogIndex+1]
-	node.log = append(node.log, args.Entries...)
+	// Below this line, AppendEntries will return success
 
-	if args.LeaderCommit > node.commitIndex {
-		node.commitIndex = min(args.LeaderCommit, len(node.log)-1)
+	if len(args.Entries) == 0 { // Empty AppendEntries (only heartbeat)
+		log.Printf("[%d, %s] Received empty AppendEntries (heartbeat) from %s...\n", node.nodeType, node.address.String(), args.LeaderId.String())
+	} else { // AppendEntries with entries
+		node.log = node.log[:args.PrevLogIndex+1]
+		node.log = append(node.log, args.Entries...)
+		if args.LeaderCommit > node.commitIndex {
+			node.commitIndex = min(args.LeaderCommit, len(node.log)-1)
+		}
+		log.Printf("[%d, %s] Appending entries from %s successfully...\n", node.nodeType, node.address.String(), args.LeaderId.String())
 	}
 
 	// Reset election timeout
@@ -297,7 +287,6 @@ func (node *RaftNode) AppendEntries(args *AppendEntriesRequest, reply *[]byte) e
 	}
 	*reply = responseBytes
 
-	log.Printf("[%d, %s] Appending entries from %s successfully...\n", node.nodeType, node.address.String(), args.LeaderId.String())
 	return nil
 }
 
