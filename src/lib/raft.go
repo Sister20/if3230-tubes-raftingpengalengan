@@ -158,7 +158,7 @@ func (node *RaftNode) leaderHeartbeat() {
 
 			var prevLogTerm int
 			if node.nextIndex[addr]-1 < 0 {
-				prevLogTerm = -1 // -1 means empty log
+				prevLogTerm = 0 // 0 means empty log
 			} else {
 				prevLogTerm = node.log[node.nextIndex[addr]-1].Term
 			}
