@@ -2,7 +2,6 @@ package lib
 
 import (
 	"encoding/json"
-	"fmt"
 	"log"
 	"math/rand"
 	"net"
@@ -171,7 +170,7 @@ func (node *RaftNode) RequestVote(args *RaftVoteRequest, reply *[]byte) error {
 
 	// Return false if the candidate's term is less than the current term
 	if args.Term > node.log[len(node.log)-1].Term {
-		log.Println(fmt.Sprintf("[%d, %s] Rejecting vote... (candidate term is less than current term)", node.nodeType, node.address.String()))
+		log.Printf("[%d, %s] Rejecting vote... (candidate term is less than current term)\n", node.nodeType, node.address.String())
 		responseMap["term"] = node.currentTerm
 		responseMap["voteGranted"] = false
 
@@ -185,7 +184,7 @@ func (node *RaftNode) RequestVote(args *RaftVoteRequest, reply *[]byte) error {
 	}
 
 	if (node.votedFor == nil || node.votedFor.String() == args.CandidateId.String()) && (args.LastLogIndex >= len(node.log)-1 && args.LastLogTerm >= node.log[len(node.log)-1].Term) {
-		log.Println(fmt.Sprintf("[%d, %s] Voting for %s...", node.nodeType, node.address.String(), args.CandidateId.String()))
+		log.Printf("[%d, %s] Voting for %s...\n", node.nodeType, node.address.String(), args.CandidateId.String())
 		node.votedFor = args.CandidateId
 		responseMap["term"] = node.currentTerm
 		responseMap["voteGranted"] = true
@@ -198,7 +197,7 @@ func (node *RaftNode) RequestVote(args *RaftVoteRequest, reply *[]byte) error {
 
 		return nil
 	} else {
-		log.Println(fmt.Sprintf("[%d, %s] Rejecting vote... (Already voted or last log not matched)", node.nodeType, node.address.String()))
+		log.Printf("[%d, %s] Rejecting vote... (Already voted or last log not matched)\n", node.nodeType, node.address.String())
 		responseMap["term"] = node.currentTerm
 		responseMap["voteGranted"] = false
 
@@ -223,7 +222,7 @@ func (node *RaftNode) AppendEntries(args *AppendEntriesRequest, reply *[]byte) e
 	}
 
 	if args.Term == -99 { // Empty
-		log.Println(fmt.Sprintf("[%d, %s] Received empty AppendEntries (heartbeat) from %s...", node.nodeType, node.address.String(), args.LeaderId.String()))
+		log.Printf("[%d, %s] Received empty AppendEntries (heartbeat) from %s...\n", node.nodeType, node.address.String(), args.LeaderId.String())
 
 		// Reset election timeout
 		node.electionTimeout.Stop()
@@ -239,7 +238,7 @@ func (node *RaftNode) AppendEntries(args *AppendEntriesRequest, reply *[]byte) e
 	}
 
 	if args.Term < node.currentTerm {
-		log.Println(fmt.Sprintf("[%d, %s] Rejecting AppendEntries from %s... (Term is less than current term)", node.nodeType, node.address.String(), args.LeaderId.String()))
+		log.Printf("[%d, %s] Rejecting AppendEntries from %s... (Term is less than current term)\n", node.nodeType, node.address.String(), args.LeaderId.String())
 		responseMap["term"] = node.currentTerm
 		responseMap["success"] = false
 
@@ -253,7 +252,7 @@ func (node *RaftNode) AppendEntries(args *AppendEntriesRequest, reply *[]byte) e
 	}
 
 	if len(node.log)-1 < args.PrevLogIndex {
-		log.Println(fmt.Sprintf("[%d, %s] Rejecting AppendEntries from %s... (Log is shorter)"), node.nodeType, node.address.String(), args.LeaderId.String())
+		log.Printf("[%d, %s] Rejecting AppendEntries from %s... (Log is shorter)\n", node.nodeType, node.address.String(), args.LeaderId.String())
 		responseMap["term"] = node.currentTerm
 		responseMap["success"] = false
 
@@ -265,7 +264,7 @@ func (node *RaftNode) AppendEntries(args *AppendEntriesRequest, reply *[]byte) e
 
 		return nil
 	} else if node.log[args.PrevLogIndex].Term != args.PrevLogTerm {
-		log.Println(fmt.Sprintf("[%d, %s] Rejecting AppendEntries from %s... (Term mismatch)", node.nodeType, node.address.String(), args.LeaderId.String()))
+		log.Printf("[%d, %s] Rejecting AppendEntries from %s... (Term mismatch)\n", node.nodeType, node.address.String(), args.LeaderId.String())
 		responseMap["term"] = node.currentTerm
 		responseMap["success"] = false
 
@@ -295,7 +294,7 @@ func (node *RaftNode) AppendEntries(args *AppendEntriesRequest, reply *[]byte) e
 	}
 	*reply = responseBytes
 
-	log.Println(fmt.Sprintf("[%d, %s] Appending entries from %s successfully...", node.nodeType, node.address.String(), args.LeaderId.String()))
+	log.Printf("[%d, %s] Appending entries from %s successfully...\n", node.nodeType, node.address.String(), args.LeaderId.String())
 	return nil
 }
 
