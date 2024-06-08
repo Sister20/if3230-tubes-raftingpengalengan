@@ -2,6 +2,7 @@ package lib
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"math/rand"
 	"net"
@@ -83,6 +84,8 @@ type AppendEntriesResponse struct {
 	Success bool
 }
 
+// type ExecuteCommand
+
 func NewRaftNode(addr net.Addr, contactAddr *net.Addr) *RaftNode {
 	node := &RaftNode{
 		address:         addr,
@@ -155,38 +158,77 @@ func (node *RaftNode) leaderHeartbeat() {
 	}
 }
 
-func (node *RaftNode) RequestVote(args *RaftVoteRequest) RaftVoteResponse {
+// TODO: Test this RPC method
+func (node *RaftNode) RequestVote(args *RaftVoteRequest, reply *[]byte) error {
 	node.mu.Lock()
 	defer node.mu.Unlock()
 
+	// Initialize response map
+	responseMap := map[string]interface{}{
+		"term":        node.currentTerm,
+		"voteGranted": false,
+	}
+
 	// Return false if the candidate's term is less than the current term
 	if args.Term > node.log[len(node.log)-1].Term {
-		return RaftVoteResponse{node.currentTerm, false}
+		log.Println(fmt.Sprintf("[%d, %s] Rejecting vote... (candidate term is less than current term)", node.nodeType, node.address.String()))
+		responseMap["term"] = node.currentTerm
+		responseMap["voteGranted"] = false
+
+		responseBytes, err := json.Marshal(responseMap)
+		if err != nil {
+			log.Fatalf("Error marshalling response: %v", err)
+		}
+		*reply = responseBytes
+
+		return nil
 	}
 
 	if (node.votedFor == nil || node.votedFor.String() == args.CandidateId.String()) && (args.LastLogIndex >= len(node.log)-1 && args.LastLogTerm >= node.log[len(node.log)-1].Term) {
+		log.Println(fmt.Sprintf("[%d, %s] Voting for %s...", node.nodeType, node.address.String(), args.CandidateId.String()))
 		node.votedFor = args.CandidateId
-		return RaftVoteResponse{node.currentTerm, true}
+		responseMap["term"] = node.currentTerm
+		responseMap["voteGranted"] = true
+
+		responseBytes, err := json.Marshal(responseMap)
+		if err != nil {
+			log.Fatalf("Error marshalling response: %v", err)
+		}
+		*reply = responseBytes
+
+		return nil
 	} else {
-		return RaftVoteResponse{node.currentTerm, false}
+		log.Println(fmt.Sprintf("[%d, %s] Rejecting vote... (Already voted or last log not matched)", node.nodeType, node.address.String()))
+		responseMap["term"] = node.currentTerm
+		responseMap["voteGranted"] = false
+
+		responseBytes, err := json.Marshal(responseMap)
+		if err != nil {
+			log.Fatalf("Error marshalling response: %v", err)
+		}
+		*reply = responseBytes
+
+		return nil
 	}
 }
 
+// TODO: Test this RPC method
 func (node *RaftNode) AppendEntries(args *AppendEntriesRequest, reply *[]byte) error {
 	node.mu.Lock()
 	defer node.mu.Unlock()
 
-	if args.Term == -99 {
-		log.Println("Received heartbeat...")
+	responseMap := map[string]interface{}{
+		"term":    node.currentTerm,
+		"success": true,
+	}
+
+	if args.Term == -99 { // Empty
+		log.Println(fmt.Sprintf("[%d, %s] Received empty AppendEntries (heartbeat) from %s...", node.nodeType, node.address.String(), args.LeaderId.String()))
 
 		// Reset election timeout
 		node.electionTimeout.Stop()
 		node.electionTimeout = time.NewTicker(time.Duration(ElectionTimeoutMin.Nanoseconds()+rand.Int63n(ElectionTimeoutMax.Nanoseconds()-ElectionTimeoutMin.Nanoseconds())) * time.Nanosecond)
 
-		responseMap := map[string]interface{}{
-			"term":    node.currentTerm,
-			"success": true,
-		}
 		responseBytes, err := json.Marshal(responseMap)
 		if err != nil {
 			log.Printf("Error marshalling response: %v", err)
@@ -196,35 +238,64 @@ func (node *RaftNode) AppendEntries(args *AppendEntriesRequest, reply *[]byte) e
 		return nil
 	}
 
-	//if args.Term < node.currentTerm {
-	//	log.Println("Rejecting AppendEntries... (Term is less than current term)")
-	//	*reply = AppendEntriesResponse{node.currentTerm, false}
-	//	return nil
-	//}
-	//
-	//if len(node.log)-1 < args.PrevLogIndex {
-	//	log.Println("Rejecting AppendEntries... (Log is shorter)")
-	//	*reply = AppendEntriesResponse{node.currentTerm, false}
-	//	return nil
-	//} else if node.log[args.PrevLogIndex].Term != args.PrevLogTerm {
-	//	log.Println("Rejecting AppendEntries... (Term mismatch)")
-	//	*reply = AppendEntriesResponse{node.currentTerm, false}
-	//	return nil
-	//}
-	//
-	//node.log = node.log[:args.PrevLogIndex+1]
-	//node.log = append(node.log, args.Entries...)
-	//
-	//if args.LeaderCommit > node.commitIndex {
-	//	node.commitIndex = min(args.LeaderCommit, len(node.log)-1)
-	//}
-	//
-	//log.Println("Appending entries successfully...")
-	//*reply = AppendEntriesResponse{node.currentTerm, true}
-	//return nil
+	if args.Term < node.currentTerm {
+		log.Println(fmt.Sprintf("[%d, %s] Rejecting AppendEntries from %s... (Term is less than current term)", node.nodeType, node.address.String(), args.LeaderId.String()))
+		responseMap["term"] = node.currentTerm
+		responseMap["success"] = false
 
-	// TODO: HAPUS INI, HANYA PLACEHOLDER
-	*reply = []byte("Placeholder")
+		responseBytes, err := json.Marshal(responseMap)
+		if err != nil {
+			log.Fatalf("Error marshalling response: %v", err)
+		}
+		*reply = responseBytes
+
+		return nil
+	}
+
+	if len(node.log)-1 < args.PrevLogIndex {
+		log.Println(fmt.Sprintf("[%d, %s] Rejecting AppendEntries from %s... (Log is shorter)"), node.nodeType, node.address.String(), args.LeaderId.String())
+		responseMap["term"] = node.currentTerm
+		responseMap["success"] = false
+
+		responseBytes, err := json.Marshal(responseMap)
+		if err != nil {
+			log.Fatalf("Error marshalling response: %v", err)
+		}
+		*reply = responseBytes
+
+		return nil
+	} else if node.log[args.PrevLogIndex].Term != args.PrevLogTerm {
+		log.Println(fmt.Sprintf("[%d, %s] Rejecting AppendEntries from %s... (Term mismatch)", node.nodeType, node.address.String(), args.LeaderId.String()))
+		responseMap["term"] = node.currentTerm
+		responseMap["success"] = false
+
+		responseBytes, err := json.Marshal(responseMap)
+		if err != nil {
+			log.Fatalf("Error marshalling response: %v", err)
+		}
+		*reply = responseBytes
+
+		return nil
+	}
+
+	node.log = node.log[:args.PrevLogIndex+1]
+	node.log = append(node.log, args.Entries...)
+
+	if args.LeaderCommit > node.commitIndex {
+		node.commitIndex = min(args.LeaderCommit, len(node.log)-1)
+	}
+
+	// Reset election timeout
+	node.electionTimeout.Stop()
+	node.electionTimeout = time.NewTicker(time.Duration(ElectionTimeoutMin.Nanoseconds()+rand.Int63n(ElectionTimeoutMax.Nanoseconds()-ElectionTimeoutMin.Nanoseconds())) * time.Nanosecond)
+
+	responseBytes, err := json.Marshal(responseMap)
+	if err != nil {
+		log.Fatalf("Error marshalling response: %v", err)
+	}
+	*reply = responseBytes
+
+	log.Println(fmt.Sprintf("[%d, %s] Appending entries from %s successfully...", node.nodeType, node.address.String(), args.LeaderId.String()))
 	return nil
 }
 
@@ -392,3 +463,5 @@ func parseAddresses(data []interface{}) []net.Addr {
 	}
 	return addresses
 }
+
+// func executeCommand(args)
