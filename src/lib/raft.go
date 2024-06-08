@@ -146,7 +146,8 @@ func (node *RaftNode) leaderHeartbeat() {
 		log.Println("[Leader] Sending heartbeat...")
 
 		request := &AppendEntriesRequest{
-			Term: -99,
+			Term:     -99,
+			LeaderId: node.address,
 		}
 
 		for _, addr := range node.clusterAddrList {
@@ -392,7 +393,18 @@ func (node *RaftNode) ApplyMembership(args *net.TCPAddr, reply *[]byte) error {
 	node.mu.Lock()
 	defer node.mu.Unlock()
 
-	node.clusterAddrList = append(node.clusterAddrList, args)
+	// append if not already in the list
+	found := false
+	for _, addr := range node.clusterAddrList {
+		if addr.String() == args.String() {
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		node.clusterAddrList = append(node.clusterAddrList, args)
+	}
 
 	clusterAddrList := make([]string, len(node.clusterAddrList))
 	for i, addr := range node.clusterAddrList {
