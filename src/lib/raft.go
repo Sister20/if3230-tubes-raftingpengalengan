@@ -111,6 +111,18 @@ func NewRaftNode(addr net.Addr, contactAddr *net.Addr) *RaftNode {
 		node.initializeAsLeader()
 	} else {
 		node.tryToApplyMembership(*contactAddr)
+		// TODO: Fix timeout, it should be reset after receiving AppendEntries
+		go func() {
+			for {
+				select {
+				case <-node.electionTimeout.C:
+					node.startElection()
+					node.electionTimeout.Reset(time.Duration(ElectionTimeoutMin.Nanoseconds()+rand.Int63n(ElectionTimeoutMax.Nanoseconds()-ElectionTimeoutMin.Nanoseconds())) * time.Nanosecond)
+				default:
+					break
+				}
+			}
+		}()
 	}
 
 	// UNCOMMENT INI KALAU MAU CEK LEADER AMA CLUSTER ADDRESS LISTNYA DIA
@@ -331,11 +343,12 @@ func (node *RaftNode) startElection() {
 	voteCount := 1
 
 	for _, addr := range node.clusterAddrList {
-		if addr.String() == node.address.String() {
+		if addr.String() == node.address.String() || addr.String() == (*node.contactAddr).String() {
 			continue
 		}
 
 		go func(addr net.Addr) {
+			log.Printf("[%s] Requesting vote\n", node.address)
 			response := node.sendRequest("RaftNode.RequestVote", addr, RaftVoteRequest{
 				Term:         node.electionTerm,
 				CandidateId:  node.address,
@@ -359,7 +372,8 @@ func (node *RaftNode) startElection() {
 
 			if result.VoteGranted {
 				voteCount++
-				if voteCount > len(node.clusterAddrList)/2+1 {
+				if voteCount > len(node.clusterAddrList)/2 {
+					log.Printf("[%s] Election won! %d votes received\n", node.address, voteCount)
 					node.mu.Lock()
 					defer node.mu.Unlock()
 					node.nodeType = LEADER
