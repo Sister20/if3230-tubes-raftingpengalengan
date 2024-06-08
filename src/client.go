@@ -17,11 +17,6 @@ type Client struct {
 	addrs   []string
 }
 
-type ExecuteResponse struct {
-	result string
-	ok     bool
-}
-
 func NewClient(addrs []string) *Client {
 	clients := make([]*rpc.Client, len(addrs))
 	for i, addr := range addrs {
@@ -89,7 +84,7 @@ func (c *Client) Execute(cmd string, args string) string {
 		var responseMap map[string]any
 		err := json.Unmarshal(x, &responseMap)
 		if err != nil {
-			return "Error unmarshalling response"
+			return "Error unmarshalling response " + err.Error()
 		}
 		if responseMap["result"] != nil {
 			response = x
@@ -101,17 +96,17 @@ func (c *Client) Execute(cmd string, args string) string {
 		return "No response"
 	}
 
-	var responseMap ExecuteResponse
+	var responseMap map[string]any
 	err := json.Unmarshal(response, &responseMap)
 	if err != nil {
 		return "Error unmarshalling response"
 	}
 
-	if responseMap.ok != true {
+	if responseMap["ok"] != true {
 		return "Server error executing command"
 	}
 
-	return responseMap.result
+	return responseMap["result"].(string)
 }
 
 func main() {
