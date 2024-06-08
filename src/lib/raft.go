@@ -6,6 +6,8 @@ import (
 	"math/rand"
 	"net"
 	"net/rpc"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -443,6 +445,69 @@ func (node *RaftNode) sendRequest(method string, addr net.Addr, request interfac
 	return response
 }
 
+func (node *RaftNode) commit() (string, bool) {
+	node.mu.Lock()
+	defer node.mu.Unlock()
+
+	var res string
+	ok := false
+
+	if node.commitIndex > node.lastApplied {
+		node.lastApplied++
+		entry := node.log[node.lastApplied]
+		res, ok = node.apply(entry.Command)
+	}
+
+	return res, ok
+}
+
+func (node *RaftNode) apply(command string) (string, bool) {
+	// parse command into each words (split by space)
+	parts := strings.Fields(command)
+	if len(parts) == 0 {
+		log.Println("Empty command")
+		return "", false
+	}
+
+	switch parts[0] {
+	case "get":
+		if len(parts) < 2 {
+			log.Println("Not enough arguments for get")
+			return "", false
+		}
+		return node.app.Get(parts[1]), true
+	case "strlen":
+		if len(parts) < 2 {
+			log.Println("Not enough arguments for strlen")
+			return "", false
+		}
+		return strconv.Itoa(node.app.Len(parts[1])), true
+	case "del":
+		if len(parts) < 2 {
+			log.Println("Not enough arguments for del")
+			return "", false
+		}
+		return node.app.Delete(parts[1]), true
+	case "set":
+		if len(parts) < 3 {
+			log.Println("Not enough arguments for set")
+			return "", false
+		}
+		node.app.Set(parts[1], parts[2])
+		return "OK", true
+	case "append":
+		if len(parts) < 3 {
+			log.Println("Not enough arguments for append")
+			return "", false
+		}
+		node.app.Append(parts[1], parts[2])
+		return "OK", true
+	default:
+		log.Printf("Unknown command: %s\n", parts[0])
+		return "", false
+	}
+}
+
 func parseAddress(addr string) net.Addr {
 	address, err := net.ResolveTCPAddr("tcp", addr)
 	if err != nil {
@@ -462,5 +527,3 @@ func parseAddresses(data []interface{}) []net.Addr {
 	}
 	return addresses
 }
-
-// func executeCommand(args)
