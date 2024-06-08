@@ -189,7 +189,7 @@ func (node *RaftNode) RequestVote(args *RaftVoteRequest, reply *[]byte) error {
 	}
 
 	// Return false if the candidate's term is less than the current term
-	if args.Term > node.log[len(node.log)-1].Term {
+	if args.Term > node.currentTerm {
 		log.Printf("[%d, %s] Rejecting vote... (candidate term is less than current term)\n", node.nodeType, node.address.String())
 		responseMap["term"] = node.currentTerm
 		responseMap["voteGranted"] = false
@@ -203,7 +203,16 @@ func (node *RaftNode) RequestVote(args *RaftVoteRequest, reply *[]byte) error {
 		return nil
 	}
 
-	if (node.votedFor == nil || node.votedFor.String() == args.CandidateId.String()) && (args.LastLogIndex >= len(node.log)-1 && args.LastLogTerm >= node.log[len(node.log)-1].Term) {
+	// Handle log term definition when log is empty
+	var lastLogTerm int
+	if len(node.log) == 0 {
+		lastLogTerm = 0
+	} else {
+		lastLogTerm = node.log[len(node.log)-1].Term
+	}
+
+	// Grant vote if candidate's term is equal to current term and candidate's log is at least as up-to-date as receiver's log
+	if (node.votedFor == nil || node.votedFor.String() == args.CandidateId.String()) && (args.LastLogIndex >= len(node.log)-1 && args.LastLogTerm >= lastLogTerm) {
 		log.Printf("[%d, %s] Voting for %s...\n", node.nodeType, node.address.String(), args.CandidateId.String())
 		node.votedFor = args.CandidateId
 		responseMap["term"] = node.currentTerm
