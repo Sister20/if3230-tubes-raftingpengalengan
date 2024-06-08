@@ -22,9 +22,9 @@ const (
 
 const (
 	HeartbeatInterval  = 1 * time.Second
-	ElectionTimeoutMin = 2 * time.Second
-	ElectionTimeoutMax = 3 * time.Second
-	RpcTimeout         = 500 * time.Millisecond
+	ElectionTimeoutMin = 6 * time.Second
+	ElectionTimeoutMax = 9 * time.Second
+	RpcTimeout         = 6 * time.Second
 )
 
 type LogEntry struct {
@@ -412,6 +412,7 @@ func (node *RaftNode) tryToApplyMembership(contactAddr net.Addr) {
 		err := json.Unmarshal(response, &result)
 		if err != nil {
 			log.Printf("Error unmarshalling response: %v", err)
+			continue
 		}
 
 		status := result["status"].(string)

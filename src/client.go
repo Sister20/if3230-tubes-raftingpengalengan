@@ -25,11 +25,16 @@ type ExecuteResponse struct {
 func NewClient(addrs []string) *Client {
 	clients := make([]*rpc.Client, len(addrs))
 	for i, addr := range addrs {
-		conn, err := net.DialTimeout("tcp", addr, lib.RpcTimeout)
-		if err != nil {
-			log.Fatalf("Dialing failed: %v", err)
+		for {
+			log.Printf("Dialing %s", addr)
+			conn, err := net.DialTimeout("tcp", addr, lib.RpcTimeout)
+			if err != nil {
+				log.Printf("Dialing failed: %v", err)
+				continue
+			}
+			clients[i] = rpc.NewClient(conn)
+			break
 		}
-		clients[i] = rpc.NewClient(conn)
 	}
 	return &Client{clients: clients, addrs: addrs}
 }
@@ -52,9 +57,13 @@ func (c *Client) Call(i int, serviceMethod string, request interface{}) []byte {
 	}(client)
 
 	var reply []byte
-	err = client.Call(serviceMethod, request, &reply)
-	if err != nil {
-		log.Fatalf("Error calling %s: %v", serviceMethod, err)
+	for {
+		err = client.Call(serviceMethod, request, &reply)
+		if err != nil {
+			log.Fatalf("Error calling %s: %v", serviceMethod, err)
+		} else {
+			break
+		}
 	}
 	return reply
 }
