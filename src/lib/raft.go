@@ -130,7 +130,7 @@ func (node *RaftNode) initializeAsLeader() {
 	node.nodeType = LEADER
 	tcpAddr, ok := node.address.(*net.TCPAddr)
 	if !ok {
-		log.Fatalf("Error converting address to TCP address")
+		log.Printf("Error converting address to TCP address")
 	}
 	node.clusterLeader = tcpAddr
 	node.clusterAddrList = append(node.clusterAddrList, node.address)
@@ -189,7 +189,7 @@ func (node *RaftNode) AppendEntries(args *AppendEntriesRequest, reply *[]byte) e
 		}
 		responseBytes, err := json.Marshal(responseMap)
 		if err != nil {
-			log.Fatalf("Error marshalling response: %v", err)
+			log.Printf("Error marshalling response: %v", err)
 		}
 		*reply = responseBytes
 
@@ -256,7 +256,7 @@ func (node *RaftNode) startElection() {
 			var result RaftVoteResponse
 			err := json.Unmarshal(response, &result)
 			if err != nil {
-				log.Fatalf("Error unmarshalling response: %v", err)
+				log.Printf("Error unmarshalling response: %v", err)
 			}
 
 			if result.Term > node.electionTerm {
@@ -275,7 +275,7 @@ func (node *RaftNode) startElection() {
 					node.nodeType = LEADER
 					tcpAddr, ok := node.address.(*net.TCPAddr)
 					if !ok {
-						log.Fatalf("Error converting address to TCP address")
+						log.Printf("Error converting address to TCP address")
 					}
 					node.clusterLeader = tcpAddr
 					go node.leaderHeartbeat()
@@ -292,7 +292,7 @@ func (node *RaftNode) tryToApplyMembership(contactAddr net.Addr) {
 
 		err := json.Unmarshal(response, &result)
 		if err != nil {
-			log.Fatalf("Error unmarshalling response: %v", err)
+			log.Printf("Error unmarshalling response: %v", err)
 		}
 
 		status := result["status"].(string)
@@ -303,7 +303,7 @@ func (node *RaftNode) tryToApplyMembership(contactAddr net.Addr) {
 			temp := parseAddress(result["clusterLeader"].(string))
 			tcpAddr, ok := temp.(*net.TCPAddr)
 			if !ok {
-				log.Fatalf("Error converting address to TCP address")
+				log.Println("Error converting address to TCP address")
 			}
 			node.clusterLeader = tcpAddr
 
@@ -337,7 +337,7 @@ func (node *RaftNode) ApplyMembership(args *net.TCPAddr, reply *[]byte) error {
 
 	responseBytes, err := json.Marshal(responseMap)
 	if err != nil {
-		log.Fatalf("Error marshalling response: %v", err)
+		log.Printf("Error marshalling response: %v", err)
 	}
 	*reply = responseBytes
 
@@ -347,23 +347,28 @@ func (node *RaftNode) ApplyMembership(args *net.TCPAddr, reply *[]byte) error {
 func (node *RaftNode) sendRequest(method string, addr net.Addr, request interface{}) []byte {
 	conn, err := net.DialTimeout("tcp", addr.String(), RpcTimeout)
 	if err != nil {
-		log.Fatalf("Dialing failed: %v", err)
+		log.Printf("Dialing failed: %v", err)
 	}
+
+	if conn == nil {
+		log.Printf("Error dialing to address: %v\n", addr)
+		return nil
+	}
+
 	client := rpc.NewClient(conn)
 	defer func(client *rpc.Client) {
-		err := client.Close()
-		if err != nil {
-			log.Fatalf("Error closing client: %v", err)
+		if client != nil {
+			err := client.Close()
+			if err != nil {
+				log.Fatalf("Error closing client: %v\n", err)
+			}
 		}
 	}(client)
 
 	var response []byte
-	if request == nil {
-		request = ""
-	}
 	err = client.Call(method, request, &response)
 	if err != nil {
-		log.Fatalf("RPC failed: %v", err)
+		log.Printf("RPC failed: %v", err)
 	}
 	return response
 }
@@ -371,7 +376,7 @@ func (node *RaftNode) sendRequest(method string, addr net.Addr, request interfac
 func parseAddress(addr string) net.Addr {
 	address, err := net.ResolveTCPAddr("tcp", addr)
 	if err != nil {
-		log.Fatalf("Error resolving address: %v", err)
+		log.Printf("Error resolving address: %v", err)
 	}
 	return address
 }
@@ -381,7 +386,7 @@ func parseAddresses(data []interface{}) []net.Addr {
 	for _, addr := range data {
 		address, err := net.ResolveTCPAddr("tcp", addr.(string))
 		if err != nil {
-			log.Fatalf("Error resolving address (%v): %v", addr, err)
+			log.Printf("Error resolving address (%v): %v", addr, err)
 		}
 		addresses = append(addresses, address)
 	}
