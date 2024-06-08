@@ -232,6 +232,25 @@ func (node *RaftNode) tryToApplyMembership(contactAddr net.Addr) {
 	}
 }
 
+func (node *RaftNode) ApplyMembership(args *net.Addr, reply *map[string]interface{}) error {
+	node.mu.Lock()
+	defer node.mu.Unlock()
+
+	node.clusterAddrList = append(node.clusterAddrList, *args)
+
+	clusterAddrList := make([]string, len(node.clusterAddrList))
+	for i, addr := range node.clusterAddrList {
+		clusterAddrList[i] = addr.String()
+	}
+	*reply = map[string]interface{}{
+		"status":          "success",
+		"clusterAddrList": clusterAddrList,
+		"clusterLeader":   node.clusterLeader,
+	}
+
+	return nil
+}
+
 func (node *RaftNode) sendRequest(method string, addr net.Addr, request interface{}) []byte {
 	conn, err := net.DialTimeout("tcp", addr.String(), RpcTimeout)
 	if err != nil {
