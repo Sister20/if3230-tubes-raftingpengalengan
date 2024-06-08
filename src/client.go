@@ -17,6 +17,11 @@ type Client struct {
 	addrs   []string
 }
 
+type ExecuteResponse struct {
+	result string
+	ok     bool
+}
+
 func NewClient(addrs []string) *Client {
 	clients := make([]*rpc.Client, len(addrs))
 	for i, addr := range addrs {
@@ -67,6 +72,34 @@ func (c *Client) CallAll(serviceMethod string, request interface{}) [][]byte {
 	return replies
 }
 
+func (c *Client) Execute(cmd string, args string) string {
+	var response []byte
+	responses := c.CallAll("RaftNode.Execute", cmd+" "+args)
+
+	for _, x := range responses {
+		if x != nil {
+			response = x
+			break // assume only leader responds
+		}
+	}
+
+	if response == nil {
+		return "No response"
+	}
+
+	var responseMap ExecuteResponse
+	err := json.Unmarshal(response, &responseMap)
+	if err != nil {
+		return "Error unmarshalling response"
+	}
+
+	if responseMap.ok != true {
+		return "Server error executing command"
+	}
+
+	return responseMap.result
+}
+
 func main() {
 	addrs := []string{
 		"localhost:8080",
@@ -96,6 +129,8 @@ func main() {
 			}
 			key := parts[1]
 			fmt.Println("Getting key", key)
+			response := client.Execute("get", key)
+			fmt.Println("Response:", response)
 		case "append":
 			if len(parts) < 3 {
 				fmt.Println("Not enough arguments for append")
@@ -104,6 +139,8 @@ func main() {
 			key := parts[1]
 			value := parts[2]
 			fmt.Println("Appending to key", key, "value", value)
+			response := client.Execute("append", key+" "+value)
+			fmt.Println("Response:", response)
 		case "set":
 			if len(parts) < 3 {
 				fmt.Println("Not enough arguments for set")
@@ -112,6 +149,8 @@ func main() {
 			key := parts[1]
 			value := parts[2]
 			fmt.Println("Setting key", key, "to value", value)
+			response := client.Execute("set", key+" "+value)
+			fmt.Println("Response:", response)
 		case "strlen":
 			if len(parts) < 2 {
 				fmt.Println("Not enough arguments for strlen")
@@ -119,6 +158,8 @@ func main() {
 			}
 			key := parts[1]
 			fmt.Println("Getting length of key", key)
+			response := client.Execute("strlen", key)
+			fmt.Println("Response:", response)
 		case "del":
 			if len(parts) < 2 {
 				fmt.Println("Not enough arguments for del")
@@ -126,6 +167,8 @@ func main() {
 			}
 			key := parts[1]
 			fmt.Println("Deleting key", key)
+			response := client.Execute("del", key)
+			fmt.Println("Response:", response)
 		case "request":
 			if len(parts) < 2 {
 				fmt.Println("Unknown command:", "request "+parts[1])
