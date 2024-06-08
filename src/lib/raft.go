@@ -140,12 +140,17 @@ func (node *RaftNode) initializeAsLeader() {
 func (node *RaftNode) leaderHeartbeat() {
 	for range node.heartbeatTicker.C {
 		log.Println("[Leader] Sending heartbeat...")
+
+		request := &AppendEntriesRequest{
+			Term: -99,
+		}
+
 		for _, addr := range node.clusterAddrList {
 			if addr.String() == node.address.String() {
 				continue
 			}
 
-			go node.sendRequest("RaftNode.AppendEntries", addr, nil)
+			go node.sendRequest("RaftNode.AppendEntries", addr, request)
 		}
 	}
 }
@@ -167,42 +172,60 @@ func (node *RaftNode) RequestVote(args *RaftVoteRequest) RaftVoteResponse {
 	}
 }
 
-func (node *RaftNode) AppendEntries(args *AppendEntriesRequest) AppendEntriesResponse {
+func (node *RaftNode) AppendEntries(args *AppendEntriesRequest, reply *[]byte) error {
 	node.mu.Lock()
 	defer node.mu.Unlock()
 
-	if args == nil {
+	if args.Term == -99 {
 		log.Println("Received heartbeat...")
 
 		// Reset election timeout
 		node.electionTimeout.Stop()
 		node.electionTimeout = time.NewTicker(time.Duration(ElectionTimeoutMin.Nanoseconds()+rand.Int63n(ElectionTimeoutMax.Nanoseconds()-ElectionTimeoutMin.Nanoseconds())) * time.Nanosecond)
 
-		return AppendEntriesResponse{node.currentTerm, true}
+		responseMap := map[string]interface{}{
+			"term":    node.currentTerm,
+			"success": true,
+		}
+		responseBytes, err := json.Marshal(responseMap)
+		if err != nil {
+			log.Fatalf("Error marshalling response: %v", err)
+		}
+		*reply = responseBytes
+
+		return nil
 	}
 
-	if args.Term < node.currentTerm {
-		log.Println("Rejecting AppendEntries... (Term is less than current term)")
-		return AppendEntriesResponse{node.currentTerm, false}
-	}
+	//if args.Term < node.currentTerm {
+	//	log.Println("Rejecting AppendEntries... (Term is less than current term)")
+	//	*reply = AppendEntriesResponse{node.currentTerm, false}
+	//	return nil
+	//}
+	//
+	//if len(node.log)-1 < args.PrevLogIndex {
+	//	log.Println("Rejecting AppendEntries... (Log is shorter)")
+	//	*reply = AppendEntriesResponse{node.currentTerm, false}
+	//	return nil
+	//} else if node.log[args.PrevLogIndex].Term != args.PrevLogTerm {
+	//	log.Println("Rejecting AppendEntries... (Term mismatch)")
+	//	*reply = AppendEntriesResponse{node.currentTerm, false}
+	//	return nil
+	//}
+	//
+	//node.log = node.log[:args.PrevLogIndex+1]
+	//node.log = append(node.log, args.Entries...)
+	//
+	//if args.LeaderCommit > node.commitIndex {
+	//	node.commitIndex = min(args.LeaderCommit, len(node.log)-1)
+	//}
+	//
+	//log.Println("Appending entries successfully...")
+	//*reply = AppendEntriesResponse{node.currentTerm, true}
+	//return nil
 
-	if len(node.log)-1 < args.PrevLogIndex {
-		log.Println("Rejecting AppendEntries... (Log is shorter)")
-		return AppendEntriesResponse{node.currentTerm, false}
-	} else if node.log[args.PrevLogIndex].Term != args.PrevLogTerm {
-		log.Println("Rejecting AppendEntries... (Term mismatch)")
-		return AppendEntriesResponse{node.currentTerm, false}
-	}
-
-	node.log = node.log[:args.PrevLogIndex+1]
-	node.log = append(node.log, args.Entries...)
-
-	if args.LeaderCommit > node.commitIndex {
-		node.commitIndex = min(args.LeaderCommit, len(node.log)-1)
-	}
-
-	log.Println("Appending entries successfully...")
-	return AppendEntriesResponse{node.currentTerm, true}
+	// TODO: HAPUS INI, HANYA PLACEHOLDER
+	*reply = []byte("Placeholder")
+	return nil
 }
 
 func (node *RaftNode) startElection() {
