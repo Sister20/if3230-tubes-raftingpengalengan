@@ -62,6 +62,13 @@ func main() {
 		}
 		cmd := parts[0]
 		switch cmd {
+		case "get":
+			if len(parts) < 2 {
+				fmt.Println("Not enough arguments for get")
+				continue
+			}
+			key := parts[1]
+			fmt.Println("Getting key", key)
 		case "append":
 			if len(parts) < 3 {
 				fmt.Println("Not enough arguments for append")
