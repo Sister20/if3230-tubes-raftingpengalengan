@@ -615,11 +615,13 @@ func (node *RaftNode) Execute(args string, reply *[]byte) error {
 				}
 
 				if result.Success {
+					node.nextIndex[addr]++
 					responses <- result
 					break
 				} else {
 					// time.Sleep(100 * time.Millisecond)
 					request.PrevLogIndex--
+					node.nextIndex[addr]--
 					if request.PrevLogIndex < 0 {
 						request.PrevLogTerm = 0
 					} else {
