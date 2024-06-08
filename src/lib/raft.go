@@ -135,17 +135,21 @@ func (node *RaftNode) leaderHeartbeat() {
 	}
 }
 
-// TODO: Implement the true condition
-func (node *RaftNode) RequestVote(args *RaftVoteRequest, reply *RaftVoteResponse) {
+func (node *RaftNode) RequestVote(args *RaftVoteRequest) RaftVoteResponse {
 	node.mu.Lock()
 	defer node.mu.Unlock()
 
 	// Return false if the candidate's term is less than the current term
 	if args.Term > node.log[len(node.log)-1].Term {
-		reply.Term = node.currentTerm
-		reply.VoteGranted = false
+		return RaftVoteResponse{node.currentTerm, false}
 	}
 
+	if (node.votedFor == nil || node.votedFor.String() == args.CandidateId.String()) && (args.LastLogIndex >= len(node.log)-1 && args.LastLogTerm >= node.log[len(node.log)-1].Term) {
+		node.votedFor = args.CandidateId
+		return RaftVoteResponse{node.currentTerm, true}
+	} else {
+		return RaftVoteResponse{node.currentTerm, false}
+	}
 }
 
 func (node *RaftNode) AppendEntries(args interface{}) {
