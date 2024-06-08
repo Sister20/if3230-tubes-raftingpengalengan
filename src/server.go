@@ -2,51 +2,29 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"net"
 	"net/rpc"
 	"os"
 	"rafting/lib"
 )
 
-func startServing(addr net.Addr, contactAddr net.Addr) {
+func startServing(addr net.Addr, contactAddr *net.Addr) {
 	fmt.Println("Starting server at", addr.String())
 
-	if contactAddr != nil {
-		fmt.Println("Contacting server at", contactAddr.String())
-		// implement the logic to contact the other node if necessary
-	}
-
-	raftNode := lib.NewRaftNode(addr, &contactAddr)
-
-	err := rpc.Register(raftNode)
+	server := rpc.NewServer()
+	node := lib.NewRaftNode(addr, contactAddr)
+	err := server.Register(node)
 	if err != nil {
-		fmt.Println("Error registering RaftNode:", err)
-		return
+		log.Fatalf("Error registering RaftNode: %v", err)
 	}
 
-	listener, err := net.Listen("tcp", addr.String())
-	if err != nil {
-		fmt.Println("Error starting server:", err)
-		return
+	l, e := net.Listen("tcp", addr.String())
+	if e != nil {
+		log.Fatal("listen error:", e)
 	}
 
-	defer func(listener net.Listener) {
-		err := listener.Close()
-		if err != nil {
-			fmt.Println("Error closing listener:", err)
-		}
-	}(listener)
-
-	fmt.Println("Server is listening on", addr.String())
-
-	for {
-		conn, err := listener.Accept()
-		if err != nil {
-			fmt.Println("Error accepting connection:", err)
-			continue
-		}
-		go rpc.ServeConn(conn)
-	}
+	server.Accept(l)
 }
 
 func main() {
@@ -73,6 +51,7 @@ func main() {
 		fmt.Println("Error resolving contact address")
 		os.Exit(0)
 	}
+	contactNetAddr := net.Addr(contactAddr)
 
-	startServing(addr, contactAddr)
+	startServing(addr, &contactNetAddr)
 }

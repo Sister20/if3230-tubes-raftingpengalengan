@@ -37,7 +37,7 @@ type RaftNode struct {
 	nodeType        NodeType
 	app             *KVStore
 	clusterAddrList []net.Addr
-	clusterLeader   *net.Addr
+	clusterLeader   *net.TCPAddr
 	contactAddr     *net.Addr
 	heartbeatTicker *time.Ticker
 	electionTerm    int
@@ -109,6 +109,17 @@ func NewRaftNode(addr net.Addr, contactAddr *net.Addr) *RaftNode {
 		node.tryToApplyMembership(*contactAddr)
 	}
 
+	// UNCOMMENT INI KALAU MAU CEK LEADER AMA CLUSTER ADDRESS LISTNYA DIA
+	//go func() {
+	//	ticker := time.NewTicker(1 * time.Second)
+	//	for range ticker.C {
+	//		node.mu.Lock() // Lock to prevent data race
+	//		fmt.Println("Cluster Leader:", node.clusterLeader)
+	//		fmt.Println("Cluster Address List:", node.clusterAddrList)
+	//		node.mu.Unlock() // Unlock after reading
+	//	}
+	//}()
+
 	return node
 }
 
@@ -117,7 +128,11 @@ func (node *RaftNode) initializeAsLeader() {
 	defer node.mu.Unlock()
 	log.Println("Initializing as leader node...")
 	node.nodeType = LEADER
-	node.clusterLeader = &node.address
+	tcpAddr, ok := node.address.(*net.TCPAddr)
+	if !ok {
+		log.Fatalf("Error converting address to TCP address")
+	}
+	node.clusterLeader = tcpAddr
 	node.clusterAddrList = append(node.clusterAddrList, node.address)
 	go node.leaderHeartbeat()
 }
@@ -201,7 +216,11 @@ func (node *RaftNode) startElection() {
 					node.mu.Lock()
 					defer node.mu.Unlock()
 					node.nodeType = LEADER
-					node.clusterLeader = &node.address
+					tcpAddr, ok := node.address.(*net.TCPAddr)
+					if !ok {
+						log.Fatalf("Error converting address to TCP address")
+					}
+					node.clusterLeader = tcpAddr
 					go node.leaderHeartbeat()
 				}
 			}
@@ -216,7 +235,7 @@ func (node *RaftNode) tryToApplyMembership(contactAddr net.Addr) {
 
 		err := json.Unmarshal(response, &result)
 		if err != nil {
-			continue
+			log.Fatalf("Error unmarshalling response: %v", err)
 		}
 
 		status := result["status"].(string)
@@ -224,33 +243,46 @@ func (node *RaftNode) tryToApplyMembership(contactAddr net.Addr) {
 			node.mu.Lock()
 
 			node.clusterAddrList = parseAddresses(result["clusterAddrList"].([]interface{}))
-			temp := parseAddress(result["clusterLeader"].(map[string]interface{}))
-			node.clusterLeader = &temp
+			temp := parseAddress(result["clusterLeader"].(string))
+			tcpAddr, ok := temp.(*net.TCPAddr)
+			if !ok {
+				log.Fatalf("Error converting address to TCP address")
+			}
+			node.clusterLeader = tcpAddr
 
 			node.mu.Unlock()
 			break
 		} else if status == "redirected" {
-			newAddr := parseAddress(result["address"].(map[string]interface{}))
+			newAddr := parseAddress(result["address"].(string))
 			contactAddr = newAddr
 		}
 	}
 }
 
-func (node *RaftNode) ApplyMembership(args *net.Addr, reply *map[string]interface{}) error {
+func (node *RaftNode) ApplyMembership(args *net.TCPAddr, reply *[]byte) error {
 	node.mu.Lock()
 	defer node.mu.Unlock()
 
-	node.clusterAddrList = append(node.clusterAddrList, *args)
+	node.clusterAddrList = append(node.clusterAddrList, args)
 
 	clusterAddrList := make([]string, len(node.clusterAddrList))
 	for i, addr := range node.clusterAddrList {
 		clusterAddrList[i] = addr.String()
 	}
-	*reply = map[string]interface{}{
+
+	clusterLeaderStr := node.clusterLeader.String()
+
+	responseMap := map[string]interface{}{
 		"status":          "success",
 		"clusterAddrList": clusterAddrList,
-		"clusterLeader":   node.clusterLeader,
+		"clusterLeader":   clusterLeaderStr,
 	}
+
+	responseBytes, err := json.Marshal(responseMap)
+	if err != nil {
+		log.Fatalf("Error marshalling response: %v", err)
+	}
+	*reply = responseBytes
 
 	return nil
 }
@@ -260,13 +292,6 @@ func (node *RaftNode) sendRequest(method string, addr net.Addr, request interfac
 	if err != nil {
 		log.Fatalf("Dialing failed: %v", err)
 	}
-	defer func(conn net.Conn) {
-		err := conn.Close()
-		if err != nil {
-			log.Fatalf("Error closing connection: %v", err)
-		}
-	}(conn)
-
 	client := rpc.NewClient(conn)
 	defer func(client *rpc.Client) {
 		err := client.Close()
@@ -276,6 +301,9 @@ func (node *RaftNode) sendRequest(method string, addr net.Addr, request interfac
 	}(client)
 
 	var response []byte
+	if request == nil {
+		request = ""
+	}
 	err = client.Call(method, request, &response)
 	if err != nil {
 		log.Fatalf("RPC failed: %v", err)
@@ -283,8 +311,8 @@ func (node *RaftNode) sendRequest(method string, addr net.Addr, request interfac
 	return response
 }
 
-func parseAddress(addr map[string]interface{}) net.Addr {
-	address, err := net.ResolveTCPAddr("tcp", addr["ip"].(string)+":"+addr["port"].(string))
+func parseAddress(addr string) net.Addr {
+	address, err := net.ResolveTCPAddr("tcp", addr)
 	if err != nil {
 		log.Fatalf("Error resolving address: %v", err)
 	}
