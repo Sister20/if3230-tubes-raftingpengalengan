@@ -569,6 +569,15 @@ func (node *RaftNode) apply(command string) (string, bool) {
 
 func (node *RaftNode) Execute(args string, reply *[]byte) error {
 	if node.nodeType != LEADER { // only leader may accept client requests
+		responseMap := map[string]interface{}{
+			"error":      "Not leader",
+			"leaderAddr": node.clusterLeader.String(),
+		}
+		responseBytes, err := json.Marshal(responseMap)
+		if err != nil {
+			log.Fatalf("Error marshalling response: %v", err)
+		}
+		*reply = responseBytes
 		return nil
 	}
 

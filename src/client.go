@@ -77,7 +77,13 @@ func (c *Client) Execute(cmd string, args string) string {
 	responses := c.CallAll("RaftNode.Execute", cmd+" "+args)
 
 	for _, x := range responses {
-		if x != nil {
+		var responseMap map[string]any
+		err := json.Unmarshal(x, &responseMap)
+		if err != nil {
+			return "Error unmarshalling response"
+		}
+		fmt.Println(responseMap)
+		if responseMap["result"] != nil {
 			response = x
 			break // assume only leader responds
 		}
