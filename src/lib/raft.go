@@ -453,6 +453,7 @@ func (node *RaftNode) ApplyMembership(args *net.TCPAddr, reply *[]byte) error {
 	responseBytes, err := json.Marshal(responseMap)
 	if err != nil {
 		log.Printf("Error marshalling response: %v", err)
+		return nil
 	}
 	*reply = responseBytes
 
@@ -573,7 +574,27 @@ func (node *RaftNode) Execute(args string, reply *[]byte) error {
 }
 
 func (node *RaftNode) RequestLog(args string, reply *[]byte) error {
+	if node.nodeType != LEADER { // only leader may accept client requests
+		return nil
+	}
+
 	// Send log to client
+	logList := make([]string, len(node.log))
+	for i, entry := range node.log {
+		logList[i] = strconv.Itoa(entry.Term) + " : " + entry.Command
+	}
+
+	responseMap := map[string]interface{}{
+		"log": logList,
+	}
+
+	responseBytes, err := json.Marshal(responseMap)
+	if err != nil {
+		log.Printf("Error marshalling response: %v", err)
+		return nil
+	}
+	*reply = responseBytes
+
 	return nil
 }
 
