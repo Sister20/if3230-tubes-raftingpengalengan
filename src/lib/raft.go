@@ -660,6 +660,24 @@ func (node *RaftNode) Execute(args string, reply *[]byte) error {
 	}()
 
 	// If majority ACK received, commit the log
+
+	// If there is only one node in the cluster, immediately commit the log
+	if len(node.clusterAddrList) == 1 {
+		node.commitIndex = len(node.log) - 1
+		res, ok := node.commit()
+		responseMap := map[string]interface{}{
+			"result": res,
+			"ok":     ok,
+		}
+		fmt.Println("Response map alone:", responseMap)
+		responseBytes, err := json.Marshal(responseMap)
+		if err != nil {
+			log.Fatalf("Error marshalling response: %v", err)
+		}
+		*reply = responseBytes
+		return nil
+	}
+
 	successCount := 1
 	for response := range responses {
 		if response.Success {
@@ -667,10 +685,10 @@ func (node *RaftNode) Execute(args string, reply *[]byte) error {
 			if successCount > len(node.clusterAddrList)/2 {
 				// Check if there exists an N such that N > commitIndex, a majority of matchIndex[i] >= N, and log[N].term == currentTerm
 				for N := node.commitIndex + 1; N < len(node.log); N++ {
-					// fmt.Println("Checking N:", N)
+					fmt.Println("Checking N:", N)
 					matchCount := 1
 					for _, matchIndex := range node.matchIndex {
-						// fmt.Println("Match index:", matchIndex)
+						fmt.Println("Match index:", matchIndex)
 						if matchIndex >= N {
 							matchCount++
 						}
@@ -681,7 +699,7 @@ func (node *RaftNode) Execute(args string, reply *[]byte) error {
 						break
 					}
 				}
-				// fmt.Println("Commit index:", node.commitIndex)
+				fmt.Println("Commit index:", node.commitIndex)
 
 				// Commit the log
 				res, ok := node.commit()
@@ -691,11 +709,20 @@ func (node *RaftNode) Execute(args string, reply *[]byte) error {
 					"result": res,
 					"ok":     ok,
 				}
+
+				fmt.Println("Response map:", responseMap)
 				responseBytes, err := json.Marshal(responseMap)
 				if err != nil {
 					log.Fatalf("Error marshalling response: %v", err)
 				}
+
 				*reply = responseBytes
+
+				erra := json.Unmarshal(responseBytes, &responseMap)
+				if erra != nil {
+					log.Fatalf("Error unmarshalling response: %v", erra)
+				}
+				fmt.Println("Response map after:", responseMap)
 				break
 			}
 		}
