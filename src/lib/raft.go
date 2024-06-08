@@ -508,6 +508,27 @@ func (node *RaftNode) apply(command string) (string, bool) {
 	}
 }
 
+func (node *RaftNode) Serve(args string, reply *[]byte) error {
+	if node.nodeType != LEADER { // only leader may accept client requests
+		return nil
+	}
+
+	// Append the command to the log
+	node.mu.Lock()
+	node.log = append(node.log, LogEntry{
+		Term:    node.currentTerm,
+		Command: args,
+	})
+
+	// Send AppendEntries to all followers
+
+	// If majority ACK received, commit the log
+
+	// Send response to client
+
+	return nil
+}
+
 func parseAddress(addr string) net.Addr {
 	address, err := net.ResolveTCPAddr("tcp", addr)
 	if err != nil {
