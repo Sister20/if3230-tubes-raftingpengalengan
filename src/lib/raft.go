@@ -167,8 +167,42 @@ func (node *RaftNode) RequestVote(args *RaftVoteRequest) RaftVoteResponse {
 	}
 }
 
-func (node *RaftNode) AppendEntries(args interface{}) {
-	log.Println("[Follower] Received heartbeat...")
+func (node *RaftNode) AppendEntries(args *AppendEntriesRequest) AppendEntriesResponse {
+	node.mu.Lock()
+	defer node.mu.Unlock()
+
+	if args == nil {
+		log.Println("Received heartbeat...")
+
+		// Reset election timeout
+		node.electionTimeout.Stop()
+		node.electionTimeout = time.NewTicker(time.Duration(ElectionTimeoutMin.Nanoseconds()+rand.Int63n(ElectionTimeoutMax.Nanoseconds()-ElectionTimeoutMin.Nanoseconds())) * time.Nanosecond)
+
+		return AppendEntriesResponse{node.currentTerm, true}
+	}
+
+	if args.Term < node.currentTerm {
+		log.Println("Rejecting AppendEntries... (Term is less than current term)")
+		return AppendEntriesResponse{node.currentTerm, false}
+	}
+
+	if len(node.log)-1 < args.PrevLogIndex {
+		log.Println("Rejecting AppendEntries... (Log is shorter)")
+		return AppendEntriesResponse{node.currentTerm, false}
+	} else if node.log[args.PrevLogIndex].Term != args.PrevLogTerm {
+		log.Println("Rejecting AppendEntries... (Term mismatch)")
+		return AppendEntriesResponse{node.currentTerm, false}
+	}
+
+	node.log = node.log[:args.PrevLogIndex+1]
+	node.log = append(node.log, args.Entries...)
+
+	if args.LeaderCommit > node.commitIndex {
+		node.commitIndex = min(args.LeaderCommit, len(node.log)-1)
+	}
+
+	log.Println("Appending entries successfully...")
+	return AppendEntriesResponse{node.currentTerm, true}
 }
 
 func (node *RaftNode) startElection() {
