@@ -551,7 +551,7 @@ func (node *RaftNode) apply(command string) (string, bool) {
 	}
 }
 
-func (node *RaftNode) Serve(args string, reply *[]byte) error {
+func (node *RaftNode) Execute(args string, reply *[]byte) error {
 	if node.nodeType != LEADER { // only leader may accept client requests
 		return nil
 	}
@@ -569,6 +569,11 @@ func (node *RaftNode) Serve(args string, reply *[]byte) error {
 
 	// Send response to client
 
+	return nil
+}
+
+func (node *RaftNode) RequestLog(args string, reply *[]byte) error {
+	// Send log to client
 	return nil
 }
 
