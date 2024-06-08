@@ -117,7 +117,7 @@ func (c *Client) Execute(cmd string, args string) string {
 func main() {
 	addrs := []string{
 		"localhost:8080",
-		"localhost:8081",
+		// "localhost:8081",
 		//"localhost:8082",
 		//"localhost:8083",
 		//"localhost:8084",

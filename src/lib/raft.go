@@ -2,6 +2,7 @@ package lib
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"math/rand"
 	"net"
@@ -126,15 +127,16 @@ func NewRaftNode(addr net.Addr, contactAddr *net.Addr) *RaftNode {
 	}
 
 	// UNCOMMENT INI KALAU MAU CEK LEADER AMA CLUSTER ADDRESS LISTNYA DIA
-	//go func() {
-	//	ticker := time.NewTicker(1 * time.Second)
-	//	for range ticker.C {
-	//		node.mu.Lock() // Lock to prevent data race
-	//		fmt.Println("Cluster Leader:", node.clusterLeader)
-	//		fmt.Println("Cluster Address List:", node.clusterAddrList)
-	//		node.mu.Unlock() // Unlock after reading
-	//	}
-	//}()
+	go func() {
+		ticker := time.NewTicker(1 * time.Second)
+		for range ticker.C {
+			node.mu.Lock() // Lock to prevent data race
+			// fmt.Println("Cluster Leader:", node.clusterLeader)
+			// fmt.Println("Cluster Address List:", node.clusterAddrList)
+			fmt.Println("Log entries:", node.log)
+			node.mu.Unlock() // Unlock after reading
+		}
+	}()
 
 	return node
 }
@@ -360,11 +362,18 @@ func (node *RaftNode) startElection() {
 		}
 		go func(addr net.Addr) {
 			log.Printf("[%s] Requesting vote\n", node.address)
+
+			var lastLogTerm int
+			if len(node.log) == 0 {
+				lastLogTerm = 0
+			} else {
+				lastLogTerm = node.log[len(node.log)-1].Term
+			}
 			response := node.sendRequest("RaftNode.RequestVote", addr, RaftVoteRequest{
 				Term:         node.electionTerm,
 				CandidateId:  node.address,
 				LastLogIndex: len(node.log) - 1,
-				LastLogTerm:  0,
+				LastLogTerm:  lastLogTerm,
 			})
 
 			var result RaftVoteResponse
@@ -620,7 +629,7 @@ func (node *RaftNode) Execute(args string, reply *[]byte) error {
 				var result AppendEntriesResponse
 				err := json.Unmarshal(response, &result)
 				if err != nil {
-					log.Printf("Error unmarshalling response from %s: %v", addr, err)
+					log.Printf("Error unmarshalling response from %s: %v\n", addr, err)
 					return
 				}
 
@@ -650,7 +659,7 @@ func (node *RaftNode) Execute(args string, reply *[]byte) error {
 	}()
 
 	// If majority ACK received, commit the log
-	successCount := 0
+	successCount := 1
 	for response := range responses {
 		if response.Success {
 			successCount++
