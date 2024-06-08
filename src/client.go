@@ -82,7 +82,6 @@ func (c *Client) Execute(cmd string, args string) string {
 		if err != nil {
 			return "Error unmarshalling response"
 		}
-		fmt.Println(responseMap)
 		if responseMap["result"] != nil {
 			response = x
 			break // assume only leader responds
