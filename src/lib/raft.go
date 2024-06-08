@@ -196,7 +196,7 @@ func (node *RaftNode) RequestVote(args *RaftVoteRequest, reply *[]byte) error {
 		*reply = responseBytes
 
 		return nil
-	} else {
+	} else { // Reject vote if already voted or last log not matched
 		log.Printf("[%d, %s] Rejecting vote... (Already voted or last log not matched)\n", node.nodeType, node.address.String())
 		responseMap["term"] = node.currentTerm
 		responseMap["voteGranted"] = false
@@ -221,7 +221,7 @@ func (node *RaftNode) AppendEntries(args *AppendEntriesRequest, reply *[]byte) e
 		"success": true,
 	}
 
-	if args.Term == -99 { // Empty
+	if args.Term == -99 { // Empty AppendEntries (heartbeat)
 		log.Printf("[%d, %s] Received empty AppendEntries (heartbeat) from %s...\n", node.nodeType, node.address.String(), args.LeaderId.String())
 
 		// Reset election timeout
@@ -237,7 +237,7 @@ func (node *RaftNode) AppendEntries(args *AppendEntriesRequest, reply *[]byte) e
 		return nil
 	}
 
-	if args.Term < node.currentTerm {
+	if args.Term < node.currentTerm { // Reject AppendEntries if term is less than current term
 		log.Printf("[%d, %s] Rejecting AppendEntries from %s... (Term is less than current term)\n", node.nodeType, node.address.String(), args.LeaderId.String())
 		responseMap["term"] = node.currentTerm
 		responseMap["success"] = false
@@ -251,7 +251,7 @@ func (node *RaftNode) AppendEntries(args *AppendEntriesRequest, reply *[]byte) e
 		return nil
 	}
 
-	if len(node.log)-1 < args.PrevLogIndex {
+	if len(node.log)-1 < args.PrevLogIndex { // Reject AppendEntries if log is shorter
 		log.Printf("[%d, %s] Rejecting AppendEntries from %s... (Log is shorter)\n", node.nodeType, node.address.String(), args.LeaderId.String())
 		responseMap["term"] = node.currentTerm
 		responseMap["success"] = false
@@ -263,7 +263,7 @@ func (node *RaftNode) AppendEntries(args *AppendEntriesRequest, reply *[]byte) e
 		*reply = responseBytes
 
 		return nil
-	} else if node.log[args.PrevLogIndex].Term != args.PrevLogTerm {
+	} else if node.log[args.PrevLogIndex].Term != args.PrevLogTerm { // Reject AppendEntries if term mismatch
 		log.Printf("[%d, %s] Rejecting AppendEntries from %s... (Term mismatch)\n", node.nodeType, node.address.String(), args.LeaderId.String())
 		responseMap["term"] = node.currentTerm
 		responseMap["success"] = false
