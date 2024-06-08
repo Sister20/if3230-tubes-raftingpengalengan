@@ -101,8 +101,8 @@ func NewRaftNode(addr net.Addr, contactAddr *net.Addr) *RaftNode {
 		electionTimeout: time.NewTicker(time.Duration(ElectionTimeoutMin.Nanoseconds()+rand.Int63n(ElectionTimeoutMax.Nanoseconds()-ElectionTimeoutMin.Nanoseconds())) * time.Nanosecond),
 		currentTerm:     0,
 		votedFor:        nil,
-		commitIndex:     0,
-		lastApplied:     0,
+		commitIndex:     -1,
+		lastApplied:     -1,
 		nextIndex:       make(map[net.Addr]int),
 		matchIndex:      make(map[net.Addr]int),
 	}
@@ -138,6 +138,12 @@ func (node *RaftNode) initializeAsLeader() {
 	}
 	node.clusterLeader = tcpAddr
 	node.clusterAddrList = append(node.clusterAddrList, node.address)
+
+	// Initialize nextIndex and matchIndex
+	for _, addr := range node.clusterAddrList {
+		node.nextIndex[addr] = len(node.log)
+		node.matchIndex[addr] = -1
+	}
 	go node.leaderHeartbeat()
 }
 
@@ -145,14 +151,25 @@ func (node *RaftNode) leaderHeartbeat() {
 	for range node.heartbeatTicker.C {
 		log.Println("[Leader] Sending heartbeat...")
 
-		request := &AppendEntriesRequest{
-			Term:     node.currentTerm,
-			LeaderId: node.address,
-		}
-
 		for _, addr := range node.clusterAddrList {
 			if addr.String() == node.address.String() {
 				continue
+			}
+
+			var prevLogTerm int
+			if node.nextIndex[addr]-1 < 0 {
+				prevLogTerm = -1 // -1 means empty log
+			} else {
+				prevLogTerm = node.log[node.nextIndex[addr]-1].Term
+			}
+
+			request := &AppendEntriesRequest{
+				Term:         node.currentTerm,
+				LeaderId:     node.address,
+				PrevLogIndex: node.nextIndex[addr] - 1,
+				PrevLogTerm:  prevLogTerm,
+				Entries:      node.log[node.nextIndex[addr]:],
+				LeaderCommit: node.commitIndex,
 			}
 
 			go node.sendRequest("RaftNode.AppendEntries", addr, request)
@@ -238,7 +255,9 @@ func (node *RaftNode) AppendEntries(args *AppendEntriesRequest, reply *[]byte) e
 		return nil
 	}
 
-	if len(node.log)-1 < args.PrevLogIndex { // Reject AppendEntries if log is shorter
+	if args.PrevLogIndex == -1 { // Check if leader log empty
+		// Pass
+	} else if len(node.log)-1 < args.PrevLogIndex { // Reject AppendEntries if log is shorter
 		log.Printf("[%d, %s] Rejecting AppendEntries from %s... (Log is shorter)\n", node.nodeType, node.address.String(), args.LeaderId.String())
 		responseMap["term"] = node.currentTerm
 		responseMap["success"] = false
@@ -521,7 +540,7 @@ func (node *RaftNode) Serve(args string, reply *[]byte) error {
 		Command: args,
 	})
 
-	// Send AppendEntries to all followers
+	// Send AppendEntries to all node in the cluster
 
 	// If majority ACK received, commit the log
 
