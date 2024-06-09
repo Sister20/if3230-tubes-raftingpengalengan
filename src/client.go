@@ -108,6 +108,11 @@ func (c *Client) Execute(cmd string, args string) string {
 	responses := c.CallAll("RaftNode.Execute", cmd+" "+args)
 
 	for _, x := range responses {
+		// idk if this will help
+		if x == nil {
+			continue
+		}
+
 		var responseMap map[string]any
 		err := json.Unmarshal(x, &responseMap)
 		if err != nil {
