@@ -227,7 +227,7 @@ func (node *RaftNode) leaderHeartbeat() {
 					response := node.sendRequest("RaftNode.AppendEntries", addr, request)
 
 					if response == nil {
-						continue
+						break
 					}
 
 					var result AppendEntriesResponse
