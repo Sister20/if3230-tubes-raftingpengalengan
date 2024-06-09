@@ -226,6 +226,10 @@ func (node *RaftNode) leaderHeartbeat() {
 				for {
 					response := node.sendRequest("RaftNode.AppendEntries", addr, request)
 
+					if response == nil {
+						continue
+					}
+
 					var result AppendEntriesResponse
 					err := json.Unmarshal(response, &result)
 					if err != nil {
