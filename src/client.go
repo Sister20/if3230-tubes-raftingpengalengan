@@ -87,6 +87,7 @@ func (c *Client) ChangeAddr(addr string) {
 	}
 	c.addr = addr
 	c.client = rpc.NewClient(conn)
+	fmt.Println("Host change addr to ", addr)
 }
 
 func (c *Client) Execute(cmd string, args string) string {
