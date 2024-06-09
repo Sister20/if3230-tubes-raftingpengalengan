@@ -577,6 +577,12 @@ func (node *RaftNode) ApplyMembership(args *net.TCPAddr, reply *[]byte) error {
 		node.clusterAddrList = append(node.clusterAddrList, args)
 	}
 
+	for _, addr := range node.clusterAddrList {
+		if addr.String() != node.address.String() && addr.String() != args.String() {
+			go node.sendRequest("RaftNode.UpdateMembership", addr, args)
+		}
+	}
+
 	clusterAddrList := make([]string, len(node.clusterAddrList))
 	for i, addr := range node.clusterAddrList {
 		clusterAddrList[i] = addr.String()
@@ -596,6 +602,26 @@ func (node *RaftNode) ApplyMembership(args *net.TCPAddr, reply *[]byte) error {
 		return nil
 	}
 	*reply = responseBytes
+
+	return nil
+}
+
+func (node *RaftNode) UpdateMembership(args *net.TCPAddr, reply *[]byte) error {
+	node.mu.Lock()
+	defer node.mu.Unlock()
+
+	// append if not already in the list
+	found := false
+	for _, addr := range node.clusterAddrList {
+		if addr.String() == args.String() {
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		node.clusterAddrList = append(node.clusterAddrList, args)
+	}
 
 	return nil
 }
