@@ -111,7 +111,6 @@ func NewRaftNode(addr net.Addr, contactAddr *net.Addr) *RaftNode {
 		node.initializeAsLeader()
 	} else {
 		node.tryToApplyMembership(*contactAddr)
-		// TODO: Fix timeout, it should be reset after receiving AppendEntries
 		go func() {
 			for {
 				select {
