@@ -85,8 +85,6 @@ type AppendEntriesResponse struct {
 	Success bool
 }
 
-// type ExecuteCommand
-
 func NewRaftNode(addr net.Addr, contactAddr *net.Addr) *RaftNode {
 	node := &RaftNode{
 		address:         addr,
@@ -177,30 +175,14 @@ func (node *RaftNode) leaderHeartbeat() {
 				continue
 			}
 
-			// var prevLogTerm int
-			// var entries []LogEntry
-			// node.mu.Lock()
-			// if node.nextIndex[addr]-1 < 0 && len(node.log) == 0 {
-			// 	prevLogTerm = 0
-			// 	entries = node.log[node.nextIndex[addr]:]
-			// } else if node.nextIndex[addr]-1 < 0 && len(node.log) != 0 {
-			// 	prevLogTerm = 0
-			// 	entries = node.log[node.nextIndex[addr] : node.nextIndex[addr]+1]
-			// } else if node.nextIndex[addr] == len(node.log) {
-			// 	prevLogTerm = node.log[node.nextIndex[addr]-1].Term
-			// 	entries = node.log[node.nextIndex[addr]:]
-			// } else {
-			// 	prevLogTerm = node.log[node.nextIndex[addr]-1].Term
-			// 	entries = node.log[node.nextIndex[addr] : node.nextIndex[addr]+1]
-			// }
 			node.mu.Lock()
 
-			fmt.Println("Next index - 1:", node.nextIndex[addr]-1, addr.String())
 			var prevLogTerm int
-			if node.nextIndex[addr]-1 < 0 {
+			if node.nextIndex[addr]-1 < 0 { // Safety check for out-of-bounds index
 				prevLogTerm = 0 // 0 means empty log
 				node.nextIndex[addr] = 0
 			} else {
+				// Safety check for out-of-bounds index
 				if node.nextIndex[addr] > len(node.log) {
 					node.nextIndex[addr] = len(node.log)
 				}
@@ -212,9 +194,7 @@ func (node *RaftNode) leaderHeartbeat() {
 				LeaderId:     node.address,
 				PrevLogIndex: node.nextIndex[addr] - 1,
 				PrevLogTerm:  prevLogTerm,
-				// Entries:      entries,
-				Entries: node.log[node.nextIndex[addr]:],
-				// Entries:      []LogEntry{},
+				Entries:      node.log[node.nextIndex[addr]:],
 				LeaderCommit: node.commitIndex,
 			}
 			node.mu.Unlock()
@@ -251,10 +231,8 @@ func (node *RaftNode) leaderHeartbeat() {
 							responses <- result
 							node.mu.Unlock()
 						}
-						// print match index
 						break
 					} else {
-						// time.Sleep(100 * time.Millisecond)
 						node.mu.Lock()
 						request.PrevLogIndex--
 						node.nextIndex[addr]--
@@ -365,9 +343,6 @@ func (node *RaftNode) AppendEntries(args *AppendEntriesRequest, reply *[]byte) e
 		return nil
 	}
 
-	// fmt.Println("Args prev log index:", args.PrevLogIndex)
-	// fmt.Println("Args prev log term:", args.PrevLogTerm)
-
 	if args.PrevLogIndex == -1 { // Check if leader log empty
 		// Pass
 	} else if len(node.log)-1 < args.PrevLogIndex { // Reject AppendEntries if log is shorter
@@ -399,9 +374,6 @@ func (node *RaftNode) AppendEntries(args *AppendEntriesRequest, reply *[]byte) e
 	}
 
 	// Below this line, AppendEntries will return success
-
-	// Print log entries
-	// fmt.Println("Log entries args:", args.Entries)
 
 	if len(args.Entries) == 0 { // Empty AppendEntries (only heartbeat)
 		log.Printf("[%d, %s] Received empty AppendEntries (heartbeat) from %s...\n", node.nodeType, node.address.String(), args.LeaderId.String())
@@ -840,7 +812,6 @@ func (node *RaftNode) Execute(args string, reply *[]byte) error {
 					node.mu.Unlock()
 					break
 				} else {
-					// time.Sleep(100 * time.Millisecond)
 					node.mu.Lock()
 					request.PrevLogIndex--
 					node.nextIndex[addr]--
@@ -863,7 +834,6 @@ func (node *RaftNode) Execute(args string, reply *[]byte) error {
 	}()
 
 	// If majority ACK received, commit the log
-
 	// If there is only one node in the cluster, immediately commit the log
 	if len(node.clusterAddrList) == 1 {
 		node.commitIndex = len(node.log) - 1
@@ -895,17 +865,14 @@ func (node *RaftNode) Execute(args string, reply *[]byte) error {
 						}
 					}
 					if matchCount > len(node.clusterAddrList)/2 && node.log[N].Term == node.currentTerm {
-						// Set commitIndex = N
 						node.commitIndex = N
 						break
 					}
 				}
 				node.mu.Unlock()
 
-				// Commit the log
 				res, ok := node.commit()
 
-				// Send response to client
 				responseMap := map[string]interface{}{
 					"result": res,
 					"ok":     ok,
