@@ -37,7 +37,7 @@ func NewClient(addrs []string) *Client {
 func (c *Client) Call(i int, serviceMethod string, request interface{}) []byte {
 	conn, err := net.DialTimeout("tcp", c.addrs[i], lib.RpcTimeout)
 	if err != nil {
-		log.Fatalf("Dialing failed: %v", err)
+		log.Printf("Dialing failed: %v", err)
 		return nil
 	}
 
@@ -46,7 +46,7 @@ func (c *Client) Call(i int, serviceMethod string, request interface{}) []byte {
 		if client != nil {
 			err := client.Close()
 			if err != nil {
-				log.Fatalf("Error closing client: %v", err)
+				log.Printf("Error closing client: %v", err)
 			}
 		}
 	}(client)
@@ -55,7 +55,7 @@ func (c *Client) Call(i int, serviceMethod string, request interface{}) []byte {
 	for {
 		err = client.Call(serviceMethod, request, &reply)
 		if err != nil {
-			log.Fatalf("Error calling %s: %v", serviceMethod, err)
+			log.Printf("Error calling %s: %v", serviceMethod, err)
 		} else {
 			break
 		}
@@ -69,7 +69,7 @@ func (c *Client) CallAll(serviceMethod string, request interface{}) [][]byte {
 		var reply []byte
 		err := client.Call(serviceMethod, request, &reply)
 		if err != nil {
-			log.Fatalf("Error calling %s: %v", err)
+			log.Printf("Error calling %s: %v", err)
 		}
 		replies[i] = reply
 	}
@@ -112,11 +112,11 @@ func (c *Client) Execute(cmd string, args string) string {
 func main() {
 	addrs := []string{
 		"localhost:8080",
-		// "localhost:8081",
-		//"localhost:8082",
-		//"localhost:8083",
-		//"localhost:8084",
-		//"localhost:8085",
+		"localhost:8081",
+		"localhost:8082",
+		// "localhost:8083",
+		// "localhost:8084",
+		// "localhost:8085",
 	}
 	client := NewClient(addrs)
 
