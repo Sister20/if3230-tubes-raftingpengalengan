@@ -169,31 +169,6 @@ func (node *RaftNode) leaderHeartbeat() {
 	for range node.heartbeatTicker.C {
 		log.Println("[Leader] Sending heartbeat...")
 
-		// for _, addr := range node.clusterAddrList {
-		// 	if addr.String() == node.address.String() {
-		// 		continue
-		// 	}
-
-		// 	var prevLogTerm int
-		// 	if node.nextIndex[addr]-1 < 0 {
-		// 		prevLogTerm = 0 // 0 means empty log
-		// 	} else {
-		// 		prevLogTerm = node.log[node.nextIndex[addr]-1].Term
-		// 	}
-
-		// request := &AppendEntriesRequest{
-		// 	Term:         node.currentTerm,
-		// 	LeaderId:     node.address,
-		// 	PrevLogIndex: node.nextIndex[addr] - 1,
-		// 	PrevLogTerm:  prevLogTerm,
-		// 	Entries:      node.log[node.nextIndex[addr]:],
-		// 	// Entries:      []LogEntry{},
-		// 	LeaderCommit: node.commitIndex,
-		// }
-
-		// 	go node.sendRequest("RaftNode.AppendEntries", addr, request)
-		// }
-
 		// Send AppendEntries to all nodes in the cluster
 		responses := make(chan AppendEntriesResponse, len(node.clusterAddrList))
 		var wg sync.WaitGroup
@@ -204,10 +179,19 @@ func (node *RaftNode) leaderHeartbeat() {
 			}
 
 			var prevLogTerm int
-			if len(node.log)-1 < 0 {
-				prevLogTerm = 0 // 0 means empty log
+			var entries []LogEntry
+			if node.nextIndex[addr]-1 < 0 && len(node.log) == 0 {
+				prevLogTerm = 0
+				entries = node.log[node.nextIndex[addr]:]
+			} else if node.nextIndex[addr]-1 < 0 && len(node.log) != 0 {
+				prevLogTerm = 0
+				entries = node.log[node.nextIndex[addr] : node.nextIndex[addr]+1]
+			} else if node.nextIndex[addr] == len(node.log) {
+				prevLogTerm = node.log[node.nextIndex[addr]-1].Term
+				entries = node.log[node.nextIndex[addr]:]
 			} else {
-				prevLogTerm = node.log[len(node.log)-1].Term
+				prevLogTerm = node.log[node.nextIndex[addr]-1].Term
+				entries = node.log[node.nextIndex[addr] : node.nextIndex[addr]+1]
 			}
 
 			request := &AppendEntriesRequest{
@@ -215,7 +199,8 @@ func (node *RaftNode) leaderHeartbeat() {
 				LeaderId:     node.address,
 				PrevLogIndex: node.nextIndex[addr] - 1,
 				PrevLogTerm:  prevLogTerm,
-				Entries:      node.log[node.nextIndex[addr]:],
+				Entries:      entries,
+				// Entries: node.log[node.nextIndex[addr]:],
 				// Entries:      []LogEntry{},
 				LeaderCommit: node.commitIndex,
 			}
@@ -227,6 +212,10 @@ func (node *RaftNode) leaderHeartbeat() {
 					response := node.sendRequest("RaftNode.AppendEntries", addr, request)
 
 					if response == nil {
+						log.Println("Unreachable address when sending heartbeat... (", addr.String(), ")")
+						if len(request.Entries) != 0 {
+							node.nextIndex[addr]++
+						}
 						break
 					}
 
@@ -244,6 +233,7 @@ func (node *RaftNode) leaderHeartbeat() {
 							node.matchIndex[addr]++
 							responses <- result
 						}
+						// print match index
 						break
 					} else {
 						// time.Sleep(100 * time.Millisecond)
@@ -254,7 +244,6 @@ func (node *RaftNode) leaderHeartbeat() {
 						} else {
 							request.PrevLogTerm = node.log[request.PrevLogIndex].Term
 						}
-						fmt.Println("PrevLogIndex and NextIndex and PrevLogTerm:", request.PrevLogIndex, node.nextIndex[addr], request.PrevLogTerm)
 					}
 
 				}
@@ -354,6 +343,9 @@ func (node *RaftNode) AppendEntries(args *AppendEntriesRequest, reply *[]byte) e
 		return nil
 	}
 
+	// fmt.Println("Args prev log index:", args.PrevLogIndex)
+	// fmt.Println("Args prev log term:", args.PrevLogTerm)
+
 	if args.PrevLogIndex == -1 { // Check if leader log empty
 		// Pass
 	} else if len(node.log)-1 < args.PrevLogIndex { // Reject AppendEntries if log is shorter
@@ -363,7 +355,7 @@ func (node *RaftNode) AppendEntries(args *AppendEntriesRequest, reply *[]byte) e
 
 		responseBytes, err := json.Marshal(responseMap)
 		if err != nil {
-			log.Fatalf("Error marshalling response: %v", err)
+			log.Printf("Error marshalling response: %v\n", err)
 		}
 		*reply = responseBytes
 		node.mu.Unlock()
@@ -387,7 +379,7 @@ func (node *RaftNode) AppendEntries(args *AppendEntriesRequest, reply *[]byte) e
 	// Below this line, AppendEntries will return success
 
 	// Print log entries
-	fmt.Println("Log entries args:", args.Entries)
+	// fmt.Println("Log entries args:", args.Entries)
 
 	if len(args.Entries) == 0 { // Empty AppendEntries (only heartbeat)
 		log.Printf("[%d, %s] Received empty AppendEntries (heartbeat) from %s...\n", node.nodeType, node.address.String(), args.LeaderId.String())
@@ -507,10 +499,27 @@ func (node *RaftNode) startElection() {
 					}
 					node.clusterLeader = tcpAddr
 					node.contactAddr = nil
-					// Initialize nextIndex and matchIndex
+
 					for _, addr := range node.clusterAddrList {
+						if addr.String() == node.address.String() {
+							continue
+						}
 						node.nextIndex[addr] = len(node.log)
-						node.matchIndex[addr] = -1
+						node.mu.Unlock()
+						responseMatchIndex := node.sendRequest("RaftNode.CalculateHighestMatchIndex", addr, &node.log)
+						node.mu.Lock()
+						var result map[string]interface{}
+						err := json.Unmarshal(responseMatchIndex, &result)
+						if err != nil {
+							log.Printf("Error unmarshalling response: %v", err)
+						}
+						if result == nil {
+							log.Printf("Unreachable address %s\n", addr.String())
+							node.matchIndex[addr] = -1
+							continue
+						}
+						node.matchIndex[addr] = int(result["highestMatchIndex"].(float64))
+
 					}
 					go node.leaderHeartbeat()
 				}
@@ -585,6 +594,31 @@ func (node *RaftNode) ApplyMembership(args *net.TCPAddr, reply *[]byte) error {
 	if err != nil {
 		log.Printf("Error marshalling response: %v", err)
 		return nil
+	}
+	*reply = responseBytes
+
+	return nil
+}
+
+func (node *RaftNode) CalculateHighestMatchIndex(args *[]LogEntry, reply *[]byte) error {
+	node.mu.Lock()
+	defer node.mu.Unlock()
+	minLength := min(len(*args), len(node.log))
+
+	highestMatchIndex := -1
+	for i := 0; i < minLength; i++ {
+		if (*args)[i].Term == node.log[i].Term && (*args)[i].Command == node.log[i].Command {
+			highestMatchIndex++
+		}
+	}
+
+	responseMap := map[string]interface{}{
+		"highestMatchIndex": highestMatchIndex,
+	}
+
+	responseBytes, err := json.Marshal(responseMap)
+	if err != nil {
+		log.Fatalf("Error marshalling response: %v", err)
 	}
 	*reply = responseBytes
 
@@ -757,7 +791,6 @@ func (node *RaftNode) Execute(args string, reply *[]byte) error {
 					} else {
 						request.PrevLogTerm = node.log[request.PrevLogIndex].Term
 					}
-					fmt.Println("PrevLogIndex and NextIndex and PrevLogTerm:", request.PrevLogIndex, node.nextIndex[addr], request.PrevLogTerm)
 				}
 
 			}
@@ -780,10 +813,9 @@ func (node *RaftNode) Execute(args string, reply *[]byte) error {
 			"result": res,
 			"ok":     ok,
 		}
-		fmt.Println("Response map alone:", responseMap)
 		responseBytes, err := json.Marshal(responseMap)
 		if err != nil {
-			log.Fatalf("Error marshalling response: %v", err)
+			log.Printf("Error marshalling response: %v", err)
 		}
 		*reply = responseBytes
 		return nil
@@ -796,10 +828,8 @@ func (node *RaftNode) Execute(args string, reply *[]byte) error {
 			if successCount > len(node.clusterAddrList)/2 {
 				// Check if there exists an N such that N > commitIndex, a majority of matchIndex[i] >= N, and log[N].term == currentTerm
 				for N := node.commitIndex + 1; N < len(node.log); N++ {
-					fmt.Println("Checking N:", N)
 					matchCount := 1
 					for _, matchIndex := range node.matchIndex {
-						fmt.Println("Match index:", matchIndex)
 						if matchIndex >= N {
 							matchCount++
 						}
@@ -810,7 +840,6 @@ func (node *RaftNode) Execute(args string, reply *[]byte) error {
 						break
 					}
 				}
-				fmt.Println("Commit index:", node.commitIndex)
 
 				// Commit the log
 				res, ok := node.commit()
@@ -821,7 +850,6 @@ func (node *RaftNode) Execute(args string, reply *[]byte) error {
 					"ok":     ok,
 				}
 
-				fmt.Println("Response map:", responseMap)
 				responseBytes, err := json.Marshal(responseMap)
 				if err != nil {
 					log.Fatalf("Error marshalling response: %v", err)
@@ -833,7 +861,6 @@ func (node *RaftNode) Execute(args string, reply *[]byte) error {
 				if erra != nil {
 					log.Fatalf("Error unmarshalling response: %v", erra)
 				}
-				fmt.Println("Response map after:", responseMap)
 				break
 			}
 		}
