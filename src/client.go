@@ -13,116 +13,72 @@ import (
 )
 
 type Client struct {
-	clients []*rpc.Client
-	addrs   []string
+	client *rpc.Client
+	addr   string
 }
 
 const (
 	maxAttempts = 5
 )
 
-func NewClient(addrs []string) *Client {
-	clients := make([]*rpc.Client, len(addrs))
+func NewClient(addr string) *Client {
+	client := &rpc.Client{}
 
-	for i, addr := range addrs {
-		attempts := 0
-		for attempts < maxAttempts {
-			log.Printf("Dialing %s", addr)
-			conn, err := net.DialTimeout("tcp", addr, lib.RpcTimeout)
-			if err != nil {
-				log.Printf("Dialing failed: %v", err)
-				attempts++
-				if attempts == maxAttempts {
-					log.Printf("Failed to dial %s after %d attempts", addr, maxAttempts)
-					return nil
-				}
-				continue
-			}
-			clients[i] = rpc.NewClient(conn)
-			break
-		}
-	}
-	return &Client{clients: clients, addrs: addrs}
-}
-
-func (c *Client) CallRPC(i int, serviceMethod string, request interface{}) []byte {
-	conn, err := net.DialTimeout("tcp", c.addrs[i], lib.RpcTimeout)
-	if err != nil {
-		log.Printf("Dialing failed: %v", err)
-		return nil
-	}
-
-	client := rpc.NewClient(conn)
-	defer func(client *rpc.Client) {
-		if client != nil {
-			err := client.Close()
-			if err != nil {
-				log.Printf("Error closing client: %v", err)
-			}
-		}
-	}(client)
-
-	var reply []byte
 	attempts := 0
 	for attempts < maxAttempts {
-		err = client.Call(serviceMethod, request, &reply)
+		log.Printf("Dialing %s", addr)
+		conn, err := net.DialTimeout("tcp", addr, lib.RpcTimeout)
 		if err != nil {
-			log.Printf("Error calling %s: %v", serviceMethod, err)
+			log.Printf("Dialing failed: %v", err)
 			attempts++
 			if attempts == maxAttempts {
-				log.Printf("Failed to call %s after %d attempts", serviceMethod, maxAttempts)
+				log.Printf("Failed to dial %s after %d attempts", addr, maxAttempts)
 				return nil
 			}
-		} else {
-			break
+			continue
 		}
+		client = rpc.NewClient(conn)
+		break
 	}
-	return reply
+	return &Client{
+		client: client,
+		addr:   addr,
+	}
 }
 
-func (c *Client) CallAll(serviceMethod string, request interface{}) [][]byte {
-	replies := make([][]byte, len(c.clients))
-	for i, client := range c.clients {
-		var reply []byte
-		attempts := 0
-		for attempts < maxAttempts {
-			err := client.Call(serviceMethod, request, &reply)
-			if err != nil {
-				log.Printf("Error calling %s: %v", err)
-				attempts++
-				if attempts == maxAttempts {
-					log.Printf("Failed to call %s after %d attempts", serviceMethod, maxAttempts)
-					break
-				}
-			} else {
-				break
-			}
-		}
-		replies[i] = reply
-	}
-	return replies
-}
-
-func (c *Client) Execute(cmd string, args string) string {
-	var response []byte
-	responses := c.CallAll("RaftNode.Execute", cmd+" "+args)
-
-	for _, x := range responses {
-		// idk if this will help
-		if x == nil {
+func (c *Client) CallAll(serviceMethod string, request interface{}) []byte {
+	var reply []byte
+	for {
+		err := c.client.Call(serviceMethod, request, &reply)
+		if err != nil {
+			log.Printf("Error calling %s: %v", serviceMethod, err)
 			continue
 		}
 
 		var responseMap map[string]any
-		err := json.Unmarshal(x, &responseMap)
+		err = json.Unmarshal(reply, &responseMap)
 		if err != nil {
-			return "Error unmarshalling response " + err.Error()
+			log.Printf("Error unmarshalling response: %v", err)
+			continue
 		}
-		if responseMap["result"] != nil {
-			response = x
-			break // assume only leader responds
+		if responseMap["leaderAddr"] != nil {
+			// retry on leader
+			err := c.client.Close()
+			if err != nil {
+				log.Fatalf("Error closing client: %v", err)
+			}
+			c = NewClient(responseMap["leaderAddr"].(string))
+		} else {
+			break
 		}
 	}
+
+	return reply
+}
+
+func (c *Client) Execute(cmd string, args string) string {
+	var response []byte
+	response = c.CallAll("RaftNode.Execute", cmd+" "+args)
 
 	if response == nil {
 		return "No response"
@@ -141,16 +97,20 @@ func (c *Client) Execute(cmd string, args string) string {
 	return responseMap["result"].(string)
 }
 
+func (c *Client) Ping() bool {
+	conn, err := net.DialTimeout("tcp", c.addr, lib.RpcTimeout)
+	return err == nil && conn != nil
+}
+
 func main() {
-	addrs := []string{
-		"localhost:8080",
-		"localhost:8081",
-		"localhost:8082",
-		// "localhost:8083",
-		// "localhost:8084",
-		// "localhost:8085",
+	if len(os.Args) < 3 {
+		fmt.Println("Usage: go run client.go <ip>:<port>")
+		os.Exit(0)
 	}
-	client := NewClient(addrs)
+
+	addr := os.Args[1] + ":" + os.Args[2]
+
+	client := NewClient(addr)
 
 	reader := bufio.NewReader(os.Stdin)
 
@@ -158,6 +118,7 @@ func main() {
 
 	// Use client.Call and client.CallAll to send requests
 	for {
+		fmt.Print("> ")
 		line, _ := reader.ReadString('\n')
 		parts := strings.Fields(line)
 		if len(parts) == 0 {
@@ -165,13 +126,21 @@ func main() {
 		}
 		cmd := parts[0]
 		switch cmd {
+		case "quit":
+			return
+		case "ping":
+			if client.Ping() {
+				fmt.Println("Pong")
+			} else {
+				fmt.Println("No response")
+			}
 		case "get":
 			if len(parts) < 2 {
 				fmt.Println("Not enough arguments for get")
 				continue
 			}
 			key := parts[1]
-			fmt.Println("Getting key", key)
+			//fmt.Println("Getting key", key)
 			response := client.Execute("get", key)
 			fmt.Println("Response:", response)
 		case "append":
@@ -181,7 +150,7 @@ func main() {
 			}
 			key := parts[1]
 			value := parts[2]
-			fmt.Println("Appending to key", key, "value", value)
+			//fmt.Println("Appending to key", key, "value", value)
 			response := client.Execute("append", key+" "+value)
 			fmt.Println("Response:", response)
 		case "set":
@@ -191,7 +160,7 @@ func main() {
 			}
 			key := parts[1]
 			value := parts[2]
-			fmt.Println("Setting key", key, "to value", value)
+			//fmt.Println("Setting key", key, "to value", value)
 			response := client.Execute("set", key+" "+value)
 			fmt.Println("Response:", response)
 		case "strlen":
@@ -200,7 +169,7 @@ func main() {
 				continue
 			}
 			key := parts[1]
-			fmt.Println("Getting length of key", key)
+			//fmt.Println("Getting length of key", key)
 			response := client.Execute("strlen", key)
 			fmt.Println("Response:", response)
 		case "del":
@@ -209,7 +178,7 @@ func main() {
 				continue
 			}
 			key := parts[1]
-			fmt.Println("Deleting key", key)
+			//fmt.Println("Deleting key", key)
 			response := client.Execute("del", key)
 			fmt.Println("Response:", response)
 		case "request":
@@ -221,23 +190,10 @@ func main() {
 				fmt.Println("Unknown command:", "request "+parts[1])
 				continue
 			}
-			fmt.Println("Requesting log")
+			//fmt.Println("Requesting log")
 
 			var response []byte
-			responses := client.CallAll("RaftNode.RequestLog", "")
-
-			for _, x := range responses {
-				var responseMap map[string]any
-				err := json.Unmarshal(x, &responseMap)
-				if err != nil {
-					fmt.Println("Error unmarshalling log entries:", err)
-				} else {
-					if responseMap["log"] != nil {
-						response = x
-						break // assume only leader responds
-					}
-				}
-			}
+			response = client.CallAll("RaftNode.RequestLog", "")
 
 			if response == nil {
 				fmt.Println("No response")
