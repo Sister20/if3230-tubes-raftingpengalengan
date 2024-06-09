@@ -62,18 +62,31 @@ func (c *Client) CallAll(serviceMethod string, request interface{}) []byte {
 			continue
 		}
 		if responseMap["leaderAddr"] != nil {
-			// retry on leader
-			err := c.client.Close()
-			if err != nil {
-				log.Fatalf("Error closing client: %v", err)
-			}
-			c = NewClient(responseMap["leaderAddr"].(string))
+			c.ChangeAddr(responseMap["leaderAddr"].(string))
 		} else {
 			break
 		}
 	}
 
 	return reply
+}
+
+func (c *Client) ChangeAddr(addr string) {
+	err := c.client.Close()
+	if err != nil {
+		log.Fatalf("Error closing client: %v", err)
+	}
+	conn, err := net.DialTimeout("tcp", addr, lib.RpcTimeout)
+	if err != nil {
+		log.Printf("Dialing failed: %v", err)
+		return
+	}
+	if conn == nil {
+		log.Printf("Dialing failed: conn is nil")
+		return
+	}
+	c.addr = addr
+	c.client = rpc.NewClient(conn)
 }
 
 func (c *Client) Execute(cmd string, args string) string {
