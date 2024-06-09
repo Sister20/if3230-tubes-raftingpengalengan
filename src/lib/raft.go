@@ -33,7 +33,6 @@ type LogEntry struct {
 	Command string
 }
 
-// TODO: Adjust the struct fields as needed
 type RaftNode struct {
 	mu              sync.Mutex
 	address         net.Addr
@@ -94,13 +93,13 @@ func NewRaftNode(addr net.Addr, contactAddr *net.Addr) *RaftNode {
 		nodeType:        FOLLOWER,
 		log:             make([]LogEntry, 0),
 		app:             NewKVStore(),
-		electionTerm:    0,
+		electionTerm:    1,
 		clusterAddrList: make([]net.Addr, 0),
 		clusterLeader:   nil,
 		contactAddr:     contactAddr,
 		heartbeatTicker: time.NewTicker(HeartbeatInterval),
 		electionTimeout: time.NewTicker(time.Duration(ElectionTimeoutMin.Nanoseconds()+rand.Int63n(ElectionTimeoutMax.Nanoseconds()-ElectionTimeoutMin.Nanoseconds())) * time.Nanosecond),
-		currentTerm:     0,
+		currentTerm:     1,
 		votedFor:        nil,
 		commitIndex:     -1,
 		lastApplied:     -1,
@@ -134,6 +133,11 @@ func NewRaftNode(addr net.Addr, contactAddr *net.Addr) *RaftNode {
 			// fmt.Println("Cluster Leader:", node.clusterLeader)
 			// fmt.Println("Cluster Address List:", node.clusterAddrList)
 			fmt.Println("Log entries:", node.log)
+			if (node.contactAddr) != nil {
+				fmt.Println("Contact address:", (*node.contactAddr).String())
+			} else {
+				fmt.Println("Contact address: nil")
+			}
 			node.mu.Unlock() // Unlock after reading
 		}
 	}()
@@ -165,16 +169,45 @@ func (node *RaftNode) leaderHeartbeat() {
 	for range node.heartbeatTicker.C {
 		log.Println("[Leader] Sending heartbeat...")
 
+		// for _, addr := range node.clusterAddrList {
+		// 	if addr.String() == node.address.String() {
+		// 		continue
+		// 	}
+
+		// 	var prevLogTerm int
+		// 	if node.nextIndex[addr]-1 < 0 {
+		// 		prevLogTerm = 0 // 0 means empty log
+		// 	} else {
+		// 		prevLogTerm = node.log[node.nextIndex[addr]-1].Term
+		// 	}
+
+		// request := &AppendEntriesRequest{
+		// 	Term:         node.currentTerm,
+		// 	LeaderId:     node.address,
+		// 	PrevLogIndex: node.nextIndex[addr] - 1,
+		// 	PrevLogTerm:  prevLogTerm,
+		// 	Entries:      node.log[node.nextIndex[addr]:],
+		// 	// Entries:      []LogEntry{},
+		// 	LeaderCommit: node.commitIndex,
+		// }
+
+		// 	go node.sendRequest("RaftNode.AppendEntries", addr, request)
+		// }
+
+		// Send AppendEntries to all nodes in the cluster
+		responses := make(chan AppendEntriesResponse, len(node.clusterAddrList))
+		var wg sync.WaitGroup
+
 		for _, addr := range node.clusterAddrList {
 			if addr.String() == node.address.String() {
 				continue
 			}
 
 			var prevLogTerm int
-			if node.nextIndex[addr]-1 < 0 {
+			if len(node.log)-1 < 0 {
 				prevLogTerm = 0 // 0 means empty log
 			} else {
-				prevLogTerm = node.log[node.nextIndex[addr]-1].Term
+				prevLogTerm = node.log[len(node.log)-1].Term
 			}
 
 			request := &AppendEntriesRequest{
@@ -182,17 +215,56 @@ func (node *RaftNode) leaderHeartbeat() {
 				LeaderId:     node.address,
 				PrevLogIndex: node.nextIndex[addr] - 1,
 				PrevLogTerm:  prevLogTerm,
-				// Entries:      node.log[node.nextIndex[addr]:],
-				Entries:      []LogEntry{},
+				Entries:      node.log[node.nextIndex[addr]:],
+				// Entries:      []LogEntry{},
 				LeaderCommit: node.commitIndex,
 			}
 
-			go node.sendRequest("RaftNode.AppendEntries", addr, request)
+			wg.Add(1)
+			go func(addr net.Addr, request *AppendEntriesRequest) {
+				defer wg.Done()
+				for {
+					response := node.sendRequest("RaftNode.AppendEntries", addr, request)
+
+					var result AppendEntriesResponse
+					err := json.Unmarshal(response, &result)
+					if err != nil {
+						log.Printf("Error unmarshalling response from %s: %v\n", addr, err)
+						return
+					}
+
+					if result.Success {
+						// Break if empty heartbeat, otherwise increment nextIndex and matchIndex
+						if len(request.Entries) != 0 {
+							node.nextIndex[addr]++
+							node.matchIndex[addr]++
+							responses <- result
+						}
+						break
+					} else {
+						// time.Sleep(100 * time.Millisecond)
+						request.PrevLogIndex--
+						node.nextIndex[addr]--
+						if request.PrevLogIndex < 0 {
+							request.PrevLogTerm = 0
+						} else {
+							request.PrevLogTerm = node.log[request.PrevLogIndex].Term
+						}
+						fmt.Println("PrevLogIndex and NextIndex and PrevLogTerm:", request.PrevLogIndex, node.nextIndex[addr], request.PrevLogTerm)
+					}
+
+				}
+			}(addr, request)
 		}
+
+		// Wait for all goroutines to finish and then close the channel
+		go func() {
+			wg.Wait()
+			close(responses)
+		}()
 	}
 }
 
-// TODO: Test this RPC method
 func (node *RaftNode) RequestVote(args *RaftVoteRequest, reply *[]byte) error {
 	node.mu.Lock()
 	defer node.mu.Unlock()
@@ -255,7 +327,6 @@ func (node *RaftNode) RequestVote(args *RaftVoteRequest, reply *[]byte) error {
 	}
 }
 
-// TODO: Test this RPC method
 func (node *RaftNode) AppendEntries(args *AppendEntriesRequest, reply *[]byte) error {
 	node.mu.Lock()
 
@@ -274,6 +345,7 @@ func (node *RaftNode) AppendEntries(args *AppendEntriesRequest, reply *[]byte) e
 			log.Fatalf("Error marshalling response: %v", err)
 		}
 		*reply = responseBytes
+		node.mu.Unlock()
 
 		return nil
 	}
@@ -290,6 +362,7 @@ func (node *RaftNode) AppendEntries(args *AppendEntriesRequest, reply *[]byte) e
 			log.Fatalf("Error marshalling response: %v", err)
 		}
 		*reply = responseBytes
+		node.mu.Unlock()
 
 		return nil
 	} else if node.log[args.PrevLogIndex].Term != args.PrevLogTerm { // Reject AppendEntries if term mismatch
@@ -302,11 +375,15 @@ func (node *RaftNode) AppendEntries(args *AppendEntriesRequest, reply *[]byte) e
 			log.Fatalf("Error marshalling response: %v", err)
 		}
 		*reply = responseBytes
+		node.mu.Unlock()
 
 		return nil
 	}
 
 	// Below this line, AppendEntries will return success
+
+	// Print log entries
+	fmt.Println("Log entries args:", args.Entries)
 
 	if len(args.Entries) == 0 { // Empty AppendEntries (only heartbeat)
 		log.Printf("[%d, %s] Received empty AppendEntries (heartbeat) from %s...\n", node.nodeType, node.address.String(), args.LeaderId.String())
@@ -315,6 +392,15 @@ func (node *RaftNode) AppendEntries(args *AppendEntriesRequest, reply *[]byte) e
 		node.log = append(node.log, args.Entries...)
 
 		log.Printf("[%d, %s] Appending entries from %s successfully...\n", node.nodeType, node.address.String(), args.LeaderId.String())
+	}
+
+	// Update contact address
+	tcpAddr, ok := args.LeaderId.(*net.TCPAddr)
+	if !ok {
+		log.Printf("Error converting address to TCP address of leader\n")
+	} else {
+		(*node.contactAddr).(*net.TCPAddr).IP = tcpAddr.IP
+		(*node.contactAddr).(*net.TCPAddr).Port = tcpAddr.Port
 	}
 
 	if args.LeaderCommit > node.commitIndex {
@@ -337,8 +423,7 @@ func (node *RaftNode) AppendEntries(args *AppendEntriesRequest, reply *[]byte) e
 	defer node.mu.Unlock()
 
 	// Reset election timeout
-	node.electionTimeout.Stop()
-	node.electionTimeout = time.NewTicker(time.Duration(ElectionTimeoutMin.Nanoseconds()+rand.Int63n(ElectionTimeoutMax.Nanoseconds()-ElectionTimeoutMin.Nanoseconds())) * time.Nanosecond)
+	node.electionTimeout.Reset(time.Duration(ElectionTimeoutMin.Nanoseconds()+rand.Int63n(ElectionTimeoutMax.Nanoseconds()-ElectionTimeoutMin.Nanoseconds())) * time.Nanosecond)
 
 	responseBytes, err := json.Marshal(responseMap)
 	if err != nil {
@@ -350,11 +435,15 @@ func (node *RaftNode) AppendEntries(args *AppendEntriesRequest, reply *[]byte) e
 }
 
 func (node *RaftNode) startElection() {
+	if node.nodeType == LEADER {
+		return
+	}
 	node.mu.Lock()
 
 	log.Println("Starting election...")
 	node.nodeType = CANDIDATE
 	node.electionTerm++
+	node.currentTerm = node.electionTerm
 	node.clusterLeader = nil
 
 	node.mu.Unlock()
@@ -392,6 +481,12 @@ func (node *RaftNode) startElection() {
 				defer node.mu.Unlock()
 				node.nodeType = FOLLOWER
 				node.electionTerm = result.Term
+				tcpAddr, err := net.ResolveTCPAddr("tcp", node.clusterLeader.String())
+				if err != nil {
+					log.Fatal(err)
+				}
+				(*node.contactAddr).(*net.TCPAddr).IP = tcpAddr.IP
+				(*node.contactAddr).(*net.TCPAddr).Port = tcpAddr.Port
 				return
 			}
 
@@ -407,6 +502,12 @@ func (node *RaftNode) startElection() {
 						log.Printf("Error converting address to TCP address")
 					}
 					node.clusterLeader = tcpAddr
+					node.contactAddr = nil
+					// Initialize nextIndex and matchIndex
+					for _, addr := range node.clusterAddrList {
+						node.nextIndex[addr] = len(node.log)
+						node.matchIndex[addr] = -1
+					}
 					go node.leaderHeartbeat()
 				}
 			}
@@ -652,6 +753,7 @@ func (node *RaftNode) Execute(args string, reply *[]byte) error {
 					} else {
 						request.PrevLogTerm = node.log[request.PrevLogIndex].Term
 					}
+					fmt.Println("PrevLogIndex and NextIndex and PrevLogTerm:", request.PrevLogIndex, node.nextIndex[addr], request.PrevLogTerm)
 				}
 
 			}
