@@ -140,7 +140,7 @@ func main() {
 		}
 		cmd := parts[0]
 		switch cmd {
-		case "quit":
+		case "exit":
 			return
 		case "ping":
 			success := false
