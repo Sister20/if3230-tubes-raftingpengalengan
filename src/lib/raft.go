@@ -130,8 +130,8 @@ func NewRaftNode(addr net.Addr, contactAddr *net.Addr) *RaftNode {
 		ticker := time.NewTicker(1 * time.Second)
 		for range ticker.C {
 			node.mu.Lock() // Lock to prevent data race
-			// fmt.Println("Cluster Leader:", node.clusterLeader)
-			// fmt.Println("Cluster Address List:", node.clusterAddrList)
+			fmt.Println("Cluster Leader:", node.clusterLeader)
+			fmt.Println("Cluster Address List:", node.clusterAddrList)
 			fmt.Println("Log entries:", node.log)
 			if (node.contactAddr) != nil {
 				fmt.Println("Contact address:", (*node.contactAddr).String())
@@ -178,20 +178,28 @@ func (node *RaftNode) leaderHeartbeat() {
 				continue
 			}
 
+			// var prevLogTerm int
+			// var entries []LogEntry
+			// node.mu.Lock()
+			// if node.nextIndex[addr]-1 < 0 && len(node.log) == 0 {
+			// 	prevLogTerm = 0
+			// 	entries = node.log[node.nextIndex[addr]:]
+			// } else if node.nextIndex[addr]-1 < 0 && len(node.log) != 0 {
+			// 	prevLogTerm = 0
+			// 	entries = node.log[node.nextIndex[addr] : node.nextIndex[addr]+1]
+			// } else if node.nextIndex[addr] == len(node.log) {
+			// 	prevLogTerm = node.log[node.nextIndex[addr]-1].Term
+			// 	entries = node.log[node.nextIndex[addr]:]
+			// } else {
+			// 	prevLogTerm = node.log[node.nextIndex[addr]-1].Term
+			// 	entries = node.log[node.nextIndex[addr] : node.nextIndex[addr]+1]
+			// }
+
 			var prevLogTerm int
-			var entries []LogEntry
-			if node.nextIndex[addr]-1 < 0 && len(node.log) == 0 {
-				prevLogTerm = 0
-				entries = node.log[node.nextIndex[addr]:]
-			} else if node.nextIndex[addr]-1 < 0 && len(node.log) != 0 {
-				prevLogTerm = 0
-				entries = node.log[node.nextIndex[addr] : node.nextIndex[addr]+1]
-			} else if node.nextIndex[addr] == len(node.log) {
-				prevLogTerm = node.log[node.nextIndex[addr]-1].Term
-				entries = node.log[node.nextIndex[addr]:]
+			if node.nextIndex[addr]-1 < 0 {
+				prevLogTerm = 0 // 0 means empty log
 			} else {
 				prevLogTerm = node.log[node.nextIndex[addr]-1].Term
-				entries = node.log[node.nextIndex[addr] : node.nextIndex[addr]+1]
 			}
 
 			request := &AppendEntriesRequest{
@@ -199,11 +207,12 @@ func (node *RaftNode) leaderHeartbeat() {
 				LeaderId:     node.address,
 				PrevLogIndex: node.nextIndex[addr] - 1,
 				PrevLogTerm:  prevLogTerm,
-				Entries:      entries,
-				// Entries: node.log[node.nextIndex[addr]:],
+				// Entries:      entries,
+				Entries: node.log[node.nextIndex[addr]:],
 				// Entries:      []LogEntry{},
 				LeaderCommit: node.commitIndex,
 			}
+			node.mu.Unlock()
 
 			wg.Add(1)
 			go func(addr net.Addr, request *AppendEntriesRequest) {
@@ -802,11 +811,12 @@ func (node *RaftNode) Execute(args string, reply *[]byte) error {
 					log.Printf("Error unmarshalling response from %s: %v\n", addr, err)
 					return
 				}
-
+				node.mu.Lock()
 				if result.Success {
 					node.nextIndex[addr]++
 					node.matchIndex[addr]++
 					responses <- result
+					node.mu.Unlock()
 					break
 				} else {
 					// time.Sleep(100 * time.Millisecond)
@@ -818,6 +828,7 @@ func (node *RaftNode) Execute(args string, reply *[]byte) error {
 						request.PrevLogTerm = node.log[request.PrevLogIndex].Term
 					}
 				}
+				node.mu.Unlock()
 
 			}
 		}(addr, request)
@@ -854,6 +865,7 @@ func (node *RaftNode) Execute(args string, reply *[]byte) error {
 			if successCount > len(node.clusterAddrList)/2 {
 				// Check if there exists an N such that N > commitIndex, a majority of matchIndex[i] >= N, and log[N].term == currentTerm
 				for N := node.commitIndex + 1; N < len(node.log); N++ {
+					node.mu.Lock()
 					matchCount := 1
 					for _, matchIndex := range node.matchIndex {
 						if matchIndex >= N {
@@ -866,6 +878,7 @@ func (node *RaftNode) Execute(args string, reply *[]byte) error {
 						break
 					}
 				}
+				node.mu.Unlock()
 
 				// Commit the log
 				res, ok := node.commit()
