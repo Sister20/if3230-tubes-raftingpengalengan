@@ -36,6 +36,7 @@ func main() {
 	gob.Register(&lib.LogEntry{})
 	gob.Register(&lib.RaftVoteRequest{})
 	gob.Register(&lib.RaftVoteResponse{})
+	gob.Register(&[]lib.LogEntry{})
 
 	// take command line arguments (ip and port)
 	if len(os.Args) < 3 {
