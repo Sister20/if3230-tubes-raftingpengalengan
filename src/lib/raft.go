@@ -23,9 +23,9 @@ const (
 
 const (
 	HeartbeatInterval  = 1 * time.Second
-	ElectionTimeoutMin = 30 * time.Second
-	ElectionTimeoutMax = 60 * time.Second
-	RpcTimeout         = 10 * time.Second
+	ElectionTimeoutMin = 15 * time.Second
+	ElectionTimeoutMax = 30 * time.Second
+	RpcTimeout         = 8 * time.Second
 )
 
 type LogEntry struct {
@@ -228,7 +228,9 @@ func (node *RaftNode) leaderHeartbeat() {
 					if response == nil {
 						log.Println("Unreachable address when sending heartbeat... (", addr.String(), ")")
 						if len(request.Entries) != 0 {
+							node.mu.Lock()
 							node.nextIndex[addr]++
+							node.mu.Unlock()
 						}
 						break
 					}
@@ -916,10 +918,6 @@ func (node *RaftNode) Execute(args string, reply *[]byte) error {
 
 				*reply = responseBytes
 
-				erra := json.Unmarshal(responseBytes, &responseMap)
-				if erra != nil {
-					log.Fatalf("Error unmarshalling response: %v", erra)
-				}
 				break
 			}
 		}
