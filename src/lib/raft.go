@@ -734,11 +734,17 @@ func (node *RaftNode) apply(command string) (string, bool) {
 		}
 		return node.app.Delete(parts[1]), true
 	case "set":
-		if len(parts) < 3 {
+		var value string
+		if len(parts) < 2 {
 			log.Println("Not enough arguments for set")
 			return "", false
 		}
-		node.app.Set(parts[1], parts[2])
+		if len(parts) < 3 {
+			value = ""
+		} else {
+			value = parts[2]
+		}
+		node.app.Set(parts[1], value)
 		return "OK", true
 	case "append":
 		if len(parts) < 3 {
