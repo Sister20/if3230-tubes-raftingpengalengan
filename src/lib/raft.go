@@ -23,9 +23,9 @@ const (
 
 const (
 	HeartbeatInterval  = 1 * time.Second
-	ElectionTimeoutMin = 6 * time.Second
-	ElectionTimeoutMax = 9 * time.Second
-	RpcTimeout         = 6 * time.Second
+	ElectionTimeoutMin = 30 * time.Second
+	ElectionTimeoutMax = 60 * time.Second
+	RpcTimeout         = 10 * time.Second
 )
 
 type LogEntry struct {
@@ -196,10 +196,15 @@ func (node *RaftNode) leaderHeartbeat() {
 			// }
 			node.mu.Lock()
 
+			fmt.Println("Next index - 1:", node.nextIndex[addr]-1, addr.String())
 			var prevLogTerm int
 			if node.nextIndex[addr]-1 < 0 {
 				prevLogTerm = 0 // 0 means empty log
+				node.nextIndex[addr] = 0
 			} else {
+				if node.nextIndex[addr] > len(node.log) {
+					node.nextIndex[addr] = len(node.log)
+				}
 				prevLogTerm = node.log[node.nextIndex[addr]-1].Term
 			}
 
@@ -239,14 +244,17 @@ func (node *RaftNode) leaderHeartbeat() {
 					if result.Success {
 						// Break if empty heartbeat, otherwise increment nextIndex and matchIndex
 						if len(request.Entries) != 0 {
+							node.mu.Lock()
 							node.nextIndex[addr]++
 							node.matchIndex[addr]++
 							responses <- result
+							node.mu.Unlock()
 						}
 						// print match index
 						break
 					} else {
 						// time.Sleep(100 * time.Millisecond)
+						node.mu.Lock()
 						request.PrevLogIndex--
 						node.nextIndex[addr]--
 						if request.PrevLogIndex < 0 {
@@ -254,6 +262,7 @@ func (node *RaftNode) leaderHeartbeat() {
 						} else {
 							request.PrevLogTerm = node.log[request.PrevLogIndex].Term
 						}
+						node.mu.Unlock()
 					}
 
 				}
@@ -301,6 +310,8 @@ func (node *RaftNode) RequestVote(args *RaftVoteRequest, reply *[]byte) error {
 		lastLogTerm = node.log[len(node.log)-1].Term
 	}
 
+	fmt.Println("Last log term:", lastLogTerm, args.LastLogTerm)
+	fmt.Println("Last log index:", len(node.log)-1, args.LastLogIndex)
 	// Grant vote if candidate's term is equal to current term and candidate's log is at least as up-to-date as receiver's log
 	if (node.votedFor == nil || node.votedFor.String() == args.CandidateId.String()) && (args.LastLogIndex >= len(node.log)-1 && args.LastLogTerm >= lastLogTerm) {
 		log.Printf("[%d, %s] Voting for %s...\n", node.nodeType, node.address.String(), args.CandidateId.String())
@@ -451,6 +462,7 @@ func (node *RaftNode) startElection() {
 	node.electionTerm++
 	node.currentTerm = node.electionTerm
 	node.clusterLeader = nil
+	node.votedFor = nil
 
 	node.mu.Unlock()
 
@@ -818,8 +830,9 @@ func (node *RaftNode) Execute(args string, reply *[]byte) error {
 					log.Printf("Error unmarshalling response from %s: %v\n", addr, err)
 					return
 				}
-				node.mu.Lock()
+
 				if result.Success {
+					node.mu.Lock()
 					node.nextIndex[addr]++
 					node.matchIndex[addr]++
 					responses <- result
@@ -827,6 +840,7 @@ func (node *RaftNode) Execute(args string, reply *[]byte) error {
 					break
 				} else {
 					// time.Sleep(100 * time.Millisecond)
+					node.mu.Lock()
 					request.PrevLogIndex--
 					node.nextIndex[addr]--
 					if request.PrevLogIndex < 0 {
@@ -834,8 +848,8 @@ func (node *RaftNode) Execute(args string, reply *[]byte) error {
 					} else {
 						request.PrevLogTerm = node.log[request.PrevLogIndex].Term
 					}
+					node.mu.Unlock()
 				}
-				node.mu.Unlock()
 
 			}
 		}(addr, request)
