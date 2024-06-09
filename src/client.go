@@ -168,12 +168,17 @@ func main() {
 			response := client.Execute("append", key+" "+value)
 			fmt.Println("Response:", response)
 		case "set":
-			if len(parts) < 3 {
+			var value string
+			if len(parts) < 2 {
 				fmt.Println("Not enough arguments for set")
 				continue
 			}
+			if len(parts) < 3 {
+				value = ""
+			} else {
+				value = parts[2]
+			}
 			key := parts[1]
-			value := parts[2]
 			//fmt.Println("Setting key", key, "to value", value)
 			response := client.Execute("set", key+" "+value)
 			fmt.Println("Response:", response)
