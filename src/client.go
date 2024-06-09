@@ -45,7 +45,7 @@ func NewClient(addrs []string) *Client {
 	return &Client{clients: clients, addrs: addrs}
 }
 
-func (c *Client) Call(i int, serviceMethod string, request interface{}) []byte {
+func (c *Client) CallRPC(i int, serviceMethod string, request interface{}) []byte {
 	conn, err := net.DialTimeout("tcp", c.addrs[i], lib.RpcTimeout)
 	if err != nil {
 		log.Printf("Dialing failed: %v", err)
@@ -84,9 +84,19 @@ func (c *Client) CallAll(serviceMethod string, request interface{}) [][]byte {
 	replies := make([][]byte, len(c.clients))
 	for i, client := range c.clients {
 		var reply []byte
-		err := client.Call(serviceMethod, request, &reply)
-		if err != nil {
-			log.Printf("Error calling %s: %v", err)
+		attempts := 0
+		for attempts < maxAttempts {
+			err := client.Call(serviceMethod, request, &reply)
+			if err != nil {
+				log.Printf("Error calling %s: %v", err)
+				attempts++
+				if attempts == maxAttempts {
+					log.Printf("Failed to call %s after %d attempts", serviceMethod, maxAttempts)
+					break
+				}
+			} else {
+				break
+			}
 		}
 		replies[i] = reply
 	}
