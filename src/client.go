@@ -143,10 +143,17 @@ func main() {
 		case "quit":
 			return
 		case "ping":
-			if client.Ping() {
+			success := false
+			for i := 0; i < maxAttempts; i++ {
+				if client.Ping() {
+					success = true
+					break
+				}
+			}
+			if success {
 				fmt.Println("Pong")
 			} else {
-				fmt.Println("No response")
+				fmt.Println("Ping failed")
 			}
 		case "get":
 			if len(parts) < 2 {
