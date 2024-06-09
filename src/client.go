@@ -17,14 +17,25 @@ type Client struct {
 	addrs   []string
 }
 
+const (
+	maxAttempts = 5
+)
+
 func NewClient(addrs []string) *Client {
 	clients := make([]*rpc.Client, len(addrs))
+
 	for i, addr := range addrs {
-		for {
+		attempts := 0
+		for attempts < maxAttempts {
 			log.Printf("Dialing %s", addr)
 			conn, err := net.DialTimeout("tcp", addr, lib.RpcTimeout)
 			if err != nil {
 				log.Printf("Dialing failed: %v", err)
+				attempts++
+				if attempts == maxAttempts {
+					log.Printf("Failed to dial %s after %d attempts", addr, maxAttempts)
+					return nil
+				}
 				continue
 			}
 			clients[i] = rpc.NewClient(conn)
@@ -52,10 +63,16 @@ func (c *Client) Call(i int, serviceMethod string, request interface{}) []byte {
 	}(client)
 
 	var reply []byte
-	for {
+	attempts := 0
+	for attempts < maxAttempts {
 		err = client.Call(serviceMethod, request, &reply)
 		if err != nil {
 			log.Printf("Error calling %s: %v", serviceMethod, err)
+			attempts++
+			if attempts == maxAttempts {
+				log.Printf("Failed to call %s after %d attempts", serviceMethod, maxAttempts)
+				return nil
+			}
 		} else {
 			break
 		}
