@@ -194,6 +194,7 @@ func (node *RaftNode) leaderHeartbeat() {
 			// 	prevLogTerm = node.log[node.nextIndex[addr]-1].Term
 			// 	entries = node.log[node.nextIndex[addr] : node.nextIndex[addr]+1]
 			// }
+			node.mu.Lock()
 
 			var prevLogTerm int
 			if node.nextIndex[addr]-1 < 0 {
